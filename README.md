@@ -8,7 +8,6 @@ collection of shell scripts (`arl`, `arr`, `ara`, `arw`, `dashb`, `sat-play`,
 
 ```text
 sat login [--replace-url] [--url-only]
-sat config path|url|token
 
 sat article read [query] [--id ID] [--raw]
 sat article edit [query] [--id ID]
