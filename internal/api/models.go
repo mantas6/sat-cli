@@ -20,6 +20,14 @@ type ArticleContents struct {
 	Contents string `json:"contents"`
 }
 
+type articleContentsRequest struct {
+	Contents string `json:"contents"`
+}
+
+type articleJournalRequest struct {
+	Journal string `json:"journal"`
+}
+
 // SavedTracksResponse is the response from the saved albums endpoint.
 type SavedTracksResponse struct {
 	Data []struct {

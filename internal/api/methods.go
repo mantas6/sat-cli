@@ -29,21 +29,21 @@ func (c *Client) GetArticle(ctx context.Context, id string) (ArticleContents, er
 // CreateArticle creates an article from Markdown contents.
 func (c *Client) CreateArticle(ctx context.Context, contents string) (Article, error) {
 	var article Article
-	err := c.SendJSON(ctx, http.MethodPost, "/api/journals/articles", map[string]string{"contents": contents}, &article)
+	err := c.SendJSON(ctx, http.MethodPost, "/api/journals/articles", articleContentsRequest{Contents: contents}, &article)
 	return article, err
 }
 
 // UpdateArticleContents replaces an article's Markdown contents.
 func (c *Client) UpdateArticleContents(ctx context.Context, id, contents string) (Article, error) {
 	var article Article
-	err := c.SendJSON(ctx, http.MethodPut, JoinPath("api", "journals", "articles", id), map[string]string{"contents": contents}, &article)
+	err := c.SendJSON(ctx, http.MethodPut, JoinPath("api", "journals", "articles", id), articleContentsRequest{Contents: contents}, &article)
 	return article, err
 }
 
 // AssignArticleJournal assigns an article to a journal by title.
 func (c *Client) AssignArticleJournal(ctx context.Context, id, journalTitle string) (Article, error) {
 	var article Article
-	err := c.SendJSON(ctx, http.MethodPut, JoinPath("api", "journals", "articles", id), map[string]string{"journal": journalTitle}, &article)
+	err := c.SendJSON(ctx, http.MethodPut, JoinPath("api", "journals", "articles", id), articleJournalRequest{Journal: journalTitle}, &article)
 	return article, err
 }
 
