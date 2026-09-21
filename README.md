@@ -12,7 +12,6 @@ sat login [--replace-url] [--url-only]
 sat article read [query] [--id ID] [--raw]
 sat article edit [query] [--id ID]
 sat article new
-sat article assign ID [journal]
 
 sat music sync
 sat music play [query] [--id ID]

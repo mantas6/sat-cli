@@ -15,6 +15,7 @@ import (
 	"github.com/mantas6/sat-cli/internal/api"
 	"github.com/mantas6/sat-cli/internal/config"
 	"github.com/mantas6/sat-cli/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 type articleLifecycleAPI struct {
@@ -137,7 +138,7 @@ func TestArticleAssignCacheHitAvoidsJournalRequestAndInvalidatesArticles(t *test
 		t.Fatal(err)
 	}
 
-	if err := executeArticleTestCommand(app, "article", "assign", "12"); err != nil {
+	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "12", ""); err != nil {
 		t.Fatal(err)
 	}
 	if gotID != "12" || gotJournal != "Work" {
@@ -169,7 +170,7 @@ func TestArticleAssignCacheMissWritesReturnedOrder(t *testing.T) {
 	}}
 	app, store, _, _ := newArticleLifecycleApp(t, client)
 
-	if err := executeArticleTestCommand(app, "article", "assign", "1"); err != nil {
+	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", ""); err != nil {
 		t.Fatal(err)
 	}
 	lines, exists, err := store.ReadCacheLines(journalCacheName)
@@ -191,7 +192,7 @@ func TestArticleAssignUsesSuppliedTitleDirectly(t *testing.T) {
 		return api.Article{}, nil
 	}}
 	app, _, _, _ := newArticleLifecycleApp(t, client)
-	if err := executeArticleTestCommand(app, "article", "assign", "1", "Journal with spaces"); err != nil {
+	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", "Journal with spaces"); err != nil {
 		t.Fatal(err)
 	}
 	if gotJournal != "Journal with spaces" {
@@ -209,7 +210,7 @@ func TestArticleAssignFailureKeepsArticleCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := executeArticleTestCommand(app, "article", "assign", "1", "Default")
+	err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", "Default")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Execute() error = %v, want %v", err, wantErr)
 	}

@@ -33,7 +33,6 @@ func newArticleCommand(app *App) *cobra.Command {
 		newArticleEditCommand(app),
 		newArticleNewCommand(app),
 		newArticleSaveCommand(app),
-		newArticleAssignCommand(app),
 	)
 	return command
 }
