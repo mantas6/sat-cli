@@ -27,14 +27,14 @@ sat ssh [artisan arguments...]
 
 Run `sat <command> --help` for details.
 
-## Install
+## Build
 
 ```sh
-bin/install            # builds and installs into $DOTS_DIR/opt/sat/bin
-bin/install ~/.local/bin
+go build -trimpath -o sat .
 ```
 
-Requires Go and, for `sat article edit|new`, Neovim.
+Requires Go and, for `sat article edit|new`, Neovim. The version shown by
+`sat --version` can be set with `-ldflags "-X main.version=..."`.
 
 ## Configuration
 
@@ -51,5 +51,5 @@ to a host and release directory derived from the base URL.
 ```sh
 go test ./...
 go vet ./...
-go build ./cmd/sat
+go build .
 ```
