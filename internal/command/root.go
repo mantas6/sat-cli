@@ -123,7 +123,20 @@ func NewRootCommand(app *App) *cobra.Command {
 	root.SetErr(app.Stderr)
 	root.SetVersionTemplate("sat {{.Version}}\n")
 
+	for _, constructor := range subcommands {
+		root.AddCommand(constructor(app))
+	}
+
 	return root
+}
+
+// subcommands lists every top-level command constructor. Each command file
+// registers itself from an init function via registerCommand so that files
+// can be added without editing this one.
+var subcommands []func(*App) *cobra.Command
+
+func registerCommand(constructor func(*App) *cobra.Command) {
+	subcommands = append(subcommands, constructor)
 }
 
 func normalizeApp(app *App) {
