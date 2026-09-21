@@ -277,6 +277,88 @@ func TestCacheLifecycleAndSplitTabs(t *testing.T) {
 	}
 }
 
+func TestSetTokenFailedWriteKeepsOriginal(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permission bits")
+	}
+
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "state")
+	store := NewStore(dir, mapEnv(nil))
+	if err := store.SetToken("original"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the state directory unwritable so os.CreateTemp cannot create the
+	// atomic temporary file. writeAtomic re-secures the directory via
+	// ensureDir, so lock the parent to keep the state directory unreachable.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Chmod(parent, 0o700)
+		os.Chmod(dir, 0o700)
+	})
+
+	if err := store.SetToken("new"); err == nil {
+		t.Fatal("SetToken succeeded despite unwritable state directory")
+	}
+
+	// Restore access so the surviving state can be inspected.
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "original" {
+		t.Fatalf("token = %q, want original", got)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "token" {
+			t.Fatalf("failed write left behind %q", entry.Name())
+		}
+	}
+}
+
+func TestBaseURLUnreadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permission bits")
+	}
+
+	dir := t.TempDir()
+	urlPath := filepath.Join(dir, "url")
+	if err := os.WriteFile(urlPath, []byte("https://sat.example\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(urlPath, 0o600) })
+
+	store := NewStore(dir, mapEnv(nil))
+	_, err := store.BaseURL()
+	if err == nil {
+		t.Fatal("BaseURL succeeded on unreadable file")
+	}
+	if errors.Is(err, ErrBaseURLMissing) {
+		t.Fatalf("BaseURL returned missing sentinel: %v", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "read") || !strings.Contains(msg, "permission denied") {
+		t.Fatalf("BaseURL error = %v, want read/permission-denied failure", err)
+	}
+}
+
 func mapEnv(values map[string]string) func(string) string {
 	return func(name string) string { return values[name] }
 }
