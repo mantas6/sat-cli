@@ -21,12 +21,12 @@ type sshTarget struct {
 }
 
 func init() {
-	registerCommand(newSSHCommand)
+	registerCommand(newRunCommand)
 }
 
-func newSSHCommand(app *App) *cobra.Command {
+func newRunCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
-		Use:                "ssh [artisan arguments...]",
+		Use:                "run [artisan arguments...]",
 		Short:              "Run Artisan on the remote Satellite host",
 		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: true,

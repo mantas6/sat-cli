@@ -91,7 +91,7 @@ func TestSSHCommandUsesUserPrefixAndQuotesArguments(t *testing.T) {
 		"REMOTE_ROOT": "/srv/sat release/current",
 	})
 
-	if err := executeSSHTestCommand(app, "ssh", "task", "two words", "it's", "$HOME"); err != nil {
+	if err := executeRunTestCommand(app, "run", "task", "two words", "it's", "$HOME"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -110,7 +110,7 @@ func TestSSHCommandPassesFlagsToArtisan(t *testing.T) {
 		"REMOTE_ROOT": "/srv/current",
 	})
 
-	if err := executeSSHTestCommand(app, "ssh", "migrate", "--force"); err != nil {
+	if err := executeRunTestCommand(app, "run", "migrate", "--force"); err != nil {
 		t.Fatal(err)
 	}
 	if got := runner.args[len(runner.args)-1]; got != "cd '/srv/current' && php artisan 'migrate' '--force'" {
@@ -125,7 +125,7 @@ func TestSSHCommandOmitsArtisanArgumentsWhenEmpty(t *testing.T) {
 		"REMOTE_ROOT": "/srv/current",
 	})
 
-	if err := executeSSHTestCommand(app, "ssh"); err != nil {
+	if err := executeRunTestCommand(app, "run"); err != nil {
 		t.Fatal(err)
 	}
 	if got := runner.args[len(runner.args)-1]; got != "cd '/srv/current' && php artisan" {
@@ -157,7 +157,7 @@ func TestSSHCommandAddsTTYOnlyForTerminalFiles(t *testing.T) {
 			app.Stdout = test.stdout
 			app.IsTerminal = func(int) bool { return test.term }
 
-			if err := executeSSHTestCommand(app, "ssh"); err != nil {
+			if err := executeRunTestCommand(app, "run"); err != nil {
 				t.Fatal(err)
 			}
 			got := len(runner.args) >= 3 && runner.args[2] == "-t"
@@ -180,7 +180,7 @@ func TestSSHCommandPreservesExitCode(t *testing.T) {
 		"REMOTE_HOST": "server",
 		"REMOTE_ROOT": "/srv/current",
 	})
-	err := executeSSHTestCommand(app, "ssh")
+	err := executeRunTestCommand(app, "run")
 	var exitErr ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != 3 {
 		t.Fatalf("Execute() error = %#v, want ExitError with code 3", err)
@@ -198,13 +198,13 @@ func TestSSHCommandHelpDoesNotRunSSH(t *testing.T) {
 			app := newSSHTestApp(runner, nil)
 			app.Stdout = &output
 
-			if err := executeSSHTestCommand(app, "ssh", helpArg); err != nil {
+			if err := executeRunTestCommand(app, "run", helpArg); err != nil {
 				t.Fatal(err)
 			}
 			if runner.name != "" {
 				t.Fatalf("runner called with %q", runner.name)
 			}
-			if !strings.Contains(output.String(), "ssh [artisan arguments...]") {
+			if !strings.Contains(output.String(), "run [artisan arguments...]") {
 				t.Fatalf("help output = %q", output.String())
 			}
 		})
@@ -219,7 +219,7 @@ func TestSSHCommandSkipsFailingBaseURLWhenTargetIsConfigured(t *testing.T) {
 	})
 	app.Config = &stubConfig{baseErr: errors.New("base URL unavailable")}
 
-	if err := executeSSHTestCommand(app, "ssh"); err != nil {
+	if err := executeRunTestCommand(app, "run"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -238,7 +238,7 @@ func newSSHTestApp(runner ProcessRunner, env map[string]string) *App {
 	}
 }
 
-func executeSSHTestCommand(app *App, args ...string) error {
+func executeRunTestCommand(app *App, args ...string) error {
 	command := NewRootCommand(app)
 	command.SetArgs(args)
 	return command.Execute()

@@ -22,7 +22,7 @@ sat music pause|resume|next|previous
 sat dashboard [--follow [5s]]
 sat weather [place]
 sat notify MESSAGE [--expire "+2 days"]
-sat ssh [artisan arguments...]
+sat run [artisan arguments...]
 ```
 
 Run `sat <command> --help` for details.
@@ -43,7 +43,7 @@ State lives in the first of `$SAT_JOURNAL_STATE`, `$XDG_STATE_HOME/sat`,
 `SAT_BASE_URL` overrides the saved URL. Existing state files from the shell
 scripts (`url`, `token`, `journals`, `list`, `tracks`, `tmp/`) are reused.
 
-`sat ssh` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
+`sat run` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
 to a host and release directory derived from the base URL.
 
 ## Development
