@@ -28,7 +28,13 @@ func newArticleCommand(app *App) *cobra.Command {
 			return command.Help()
 		},
 	}
-	command.AddCommand(newArticleReadCommand(app))
+	command.AddCommand(
+		newArticleReadCommand(app),
+		newArticleEditCommand(app),
+		newArticleNewCommand(app),
+		newArticleSaveCommand(app),
+		newArticleAssignCommand(app),
+	)
 	return command
 }
 
