@@ -42,7 +42,7 @@ type APIClient interface {
 	ControlPlayback(context.Context, string) error
 	Dashboard(context.Context) (string, error)
 	Weather(context.Context, string) (string, error)
-	Notify(context.Context, string, string) error
+	Notify(context.Context, string) error
 }
 
 // APIClientFactory constructs an API client from persisted configuration.

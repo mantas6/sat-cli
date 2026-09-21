@@ -19,7 +19,7 @@ sat music pause|resume|next|previous
 
 sat dashboard [--follow [5s]]
 sat weather [place]
-sat notify MESSAGE [--expire "+2 days"]
+sat notify MESSAGE
 sat run [artisan arguments...]
 ```
 

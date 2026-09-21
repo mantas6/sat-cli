@@ -12,8 +12,6 @@ func init() {
 }
 
 func newNotifyCommand(app *App) *cobra.Command {
-	var expire string
-
 	command := &cobra.Command{
 		Use:   "notify MESSAGE",
 		Short: "Send a notification",
@@ -27,9 +25,8 @@ func newNotifyCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return client.Notify(cmd.Context(), args[0], expire)
+			return client.Notify(cmd.Context(), args[0])
 		},
 	}
-	command.Flags().StringVar(&expire, "expire", "+2 days", "notification expiration")
 	return command
 }

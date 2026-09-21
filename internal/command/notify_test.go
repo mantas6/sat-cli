@@ -11,7 +11,7 @@ import (
 
 type stubAPI struct {
 	weather func(context.Context, string) (string, error)
-	notify  func(context.Context, string, string) error
+	notify  func(context.Context, string) error
 }
 
 func (s *stubAPI) ListArticles(context.Context, bool) ([]api.Article, error) {
@@ -61,11 +61,11 @@ func (s *stubAPI) Weather(ctx context.Context, place string) (string, error) {
 	return s.weather(ctx, place)
 }
 
-func (s *stubAPI) Notify(ctx context.Context, message, expire string) error {
+func (s *stubAPI) Notify(ctx context.Context, message string) error {
 	if s.notify == nil {
 		return nil
 	}
-	return s.notify(ctx, message, expire)
+	return s.notify(ctx, message)
 }
 
 type stubConfig struct {
@@ -105,10 +105,10 @@ func executeWeatherNotifyTestCommand(app *App, args ...string) error {
 	return command.Execute()
 }
 
-func TestNotifyForwardsMessageAndDefaultExpiration(t *testing.T) {
-	var gotMessage, gotExpire string
-	client := &stubAPI{notify: func(_ context.Context, message, expire string) error {
-		gotMessage, gotExpire = message, expire
+func TestNotifyForwardsMessage(t *testing.T) {
+	var gotMessage string
+	client := &stubAPI{notify: func(_ context.Context, message string) error {
+		gotMessage = message
 		return nil
 	}}
 	app, output := newWeatherNotifyTestApp(client)
@@ -116,27 +116,11 @@ func TestNotifyForwardsMessageAndDefaultExpiration(t *testing.T) {
 	if err := executeWeatherNotifyTestCommand(app, "notify", "deploy complete"); err != nil {
 		t.Fatal(err)
 	}
-	if gotMessage != "deploy complete" || gotExpire != "+2 days" {
-		t.Fatalf("Notify() = (%q, %q), want (%q, %q)", gotMessage, gotExpire, "deploy complete", "+2 days")
+	if gotMessage != "deploy complete" {
+		t.Fatalf("Notify() = %q, want %q", gotMessage, "deploy complete")
 	}
 	if output.Len() != 0 {
 		t.Fatalf("output = %q, want no output", output.String())
-	}
-}
-
-func TestNotifyExpirationOverride(t *testing.T) {
-	var gotExpire string
-	client := &stubAPI{notify: func(_ context.Context, _, expire string) error {
-		gotExpire = expire
-		return nil
-	}}
-	app, _ := newWeatherNotifyTestApp(client)
-
-	if err := executeWeatherNotifyTestCommand(app, "notify", "message", "--expire", "+1 hour"); err != nil {
-		t.Fatal(err)
-	}
-	if gotExpire != "+1 hour" {
-		t.Fatalf("expire = %q, want %q", gotExpire, "+1 hour")
 	}
 }
 
@@ -163,7 +147,7 @@ func TestNotifyRejectsInvalidArguments(t *testing.T) {
 
 func TestNotifyAPIErrorPropagates(t *testing.T) {
 	wantErr := errors.New("notification failed")
-	client := &stubAPI{notify: func(context.Context, string, string) error {
+	client := &stubAPI{notify: func(context.Context, string) error {
 		return wantErr
 	}}
 	app, _ := newWeatherNotifyTestApp(client)

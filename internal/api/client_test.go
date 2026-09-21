@@ -130,15 +130,18 @@ func TestNotifyEncodesForm(t *testing.T) {
 		if err := request.ParseForm(); err != nil {
 			t.Error(err)
 		}
-		if request.PostForm.Get("message") != "a message & more" || request.PostForm.Get("expire") != "+2 days" {
+		if request.PostForm.Get("message") != "a message & more" {
 			t.Errorf("form = %#v", request.PostForm)
+		}
+		if _, ok := request.PostForm["expire"]; ok {
+			t.Errorf("form unexpectedly contains expire: %#v", request.PostForm)
 		}
 		writer.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
 
 	client := newTestClient(t, server.URL, "token")
-	if err := client.Notify(context.Background(), "a message & more", "+2 days"); err != nil {
+	if err := client.Notify(context.Background(), "a message & more"); err != nil {
 		t.Fatal(err)
 	}
 }

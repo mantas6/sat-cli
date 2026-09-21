@@ -108,11 +108,10 @@ func (c *Client) Weather(ctx context.Context, place string) (string, error) {
 	return string(data), err
 }
 
-// Notify posts a notification message and expiration value.
-func (c *Client) Notify(ctx context.Context, message, expire string) error {
+// Notify posts a notification message.
+func (c *Client) Notify(ctx context.Context, message string) error {
 	_, err := c.PostForm(ctx, "/api/notify", url.Values{
 		"message": {message},
-		"expire":  {expire},
 	})
 	return err
 }
