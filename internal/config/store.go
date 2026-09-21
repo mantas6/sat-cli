@@ -46,14 +46,9 @@ func (s *Store) Dir() string {
 	return s.dir
 }
 
-// BaseURL returns the validated server URL. SAT_BASE_URL takes precedence over
-// the persisted URL.
+// BaseURL returns the validated server URL read from the configured URL path.
 func (s *Store) BaseURL() (string, error) {
-	if value := strings.TrimSpace(s.getenv("SAT_BASE_URL")); value != "" {
-		return validateBaseURL(value)
-	}
-
-	value, err := s.readTrimmed("url", ErrBaseURLMissing)
+	value, err := s.readTrimmed(s.urlPath(), ErrBaseURLMissing)
 	if err != nil {
 		return "", err
 	}
@@ -63,7 +58,7 @@ func (s *Store) BaseURL() (string, error) {
 
 // Token returns the configured bearer token with surrounding whitespace removed.
 func (s *Store) Token() (string, error) {
-	return s.readTrimmed("token", ErrTokenMissing)
+	return s.readTrimmed(s.tokenPath(), ErrTokenMissing)
 }
 
 // SetBaseURL validates and atomically persists a server URL.
@@ -73,7 +68,7 @@ func (s *Store) SetBaseURL(value string) error {
 		return err
 	}
 
-	return s.writeAtomic("url", []byte(value+"\n"))
+	return s.writeAtomic(s.urlPath(), []byte(value+"\n"))
 }
 
 // SetToken atomically persists a bearer token.
@@ -83,28 +78,44 @@ func (s *Store) SetToken(value string) error {
 		return ErrTokenMissing
 	}
 
-	return s.writeAtomic("token", []byte(value+"\n"))
+	return s.writeAtomic(s.tokenPath(), []byte(value+"\n"))
 }
 
-// HasBaseURL reports whether a non-empty URL override or URL file exists.
+// HasBaseURL reports whether a non-empty URL file exists.
 func (s *Store) HasBaseURL() bool {
-	if strings.TrimSpace(s.getenv("SAT_BASE_URL")) != "" {
-		return true
-	}
-
-	value, err := os.ReadFile(s.path("url"))
+	value, err := os.ReadFile(s.urlPath())
 	return err == nil && strings.TrimSpace(string(value)) != ""
 }
 
 // HasToken reports whether a non-empty token file exists.
 func (s *Store) HasToken() bool {
-	value, err := os.ReadFile(s.path("token"))
+	value, err := os.ReadFile(s.tokenPath())
 	return err == nil && strings.TrimSpace(string(value)) != ""
+}
+
+// urlPath returns the file the base URL is read from and written to. It honours
+// the SAT_URL_PATH override, falling back to the state directory's url file.
+func (s *Store) urlPath() string {
+	if value := strings.TrimSpace(s.getenv("SAT_URL_PATH")); value != "" {
+		return value
+	}
+
+	return s.path("url")
+}
+
+// tokenPath returns the file the token is read from and written to. It honours
+// the SAT_TOKEN_PATH override, falling back to the state directory's token file.
+func (s *Store) tokenPath() string {
+	if value := strings.TrimSpace(s.getenv("SAT_TOKEN_PATH")); value != "" {
+		return value
+	}
+
+	return s.path("token")
 }
 
 // TmpDir creates, if necessary, and returns the private temporary directory.
 func (s *Store) TmpDir() (string, error) {
-	if err := s.ensureDir(); err != nil {
+	if err := ensureDir(s.dir); err != nil {
 		return "", err
 	}
 
@@ -153,7 +164,7 @@ func (s *Store) WriteCacheLines(name string, lines []string) error {
 		data = append(data, '\n')
 	}
 
-	return s.writeAtomic(name, data)
+	return s.writeAtomic(s.path(name), data)
 }
 
 // RemoveCache removes a cache, treating a missing cache as success.
@@ -173,13 +184,13 @@ func (s *Store) RemoveCache(name string) error {
 	return nil
 }
 
-func (s *Store) readTrimmed(name string, missing error) (string, error) {
-	data, err := os.ReadFile(s.path(name))
+func (s *Store) readTrimmed(path string, missing error) (string, error) {
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", missing
 	}
 	if err != nil {
-		return "", fmt.Errorf("read %s configuration: %w", name, err)
+		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 
 	value := strings.TrimSpace(string(data))
@@ -190,25 +201,27 @@ func (s *Store) readTrimmed(name string, missing error) (string, error) {
 	return value, nil
 }
 
-func (s *Store) ensureDir() error {
-	if err := os.MkdirAll(s.dir, stateDirMode); err != nil {
+func ensureDir(dir string) error {
+	if err := os.MkdirAll(dir, stateDirMode); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
 	}
-	if err := os.Chmod(s.dir, stateDirMode); err != nil {
+	if err := os.Chmod(dir, stateDirMode); err != nil {
 		return fmt.Errorf("secure state directory: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Store) writeAtomic(name string, data []byte) (err error) {
-	if err := s.ensureDir(); err != nil {
+func (s *Store) writeAtomic(target string, data []byte) (err error) {
+	dir := filepath.Dir(target)
+	if err := ensureDir(dir); err != nil {
 		return err
 	}
 
-	temporary, err := os.CreateTemp(s.dir, "."+name+".tmp-*")
+	base := filepath.Base(target)
+	temporary, err := os.CreateTemp(dir, "."+base+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("create temporary %s file: %w", name, err)
+		return fmt.Errorf("create temporary %s file: %w", base, err)
 	}
 	temporaryName := temporary.Name()
 	defer func() {
@@ -217,19 +230,19 @@ func (s *Store) writeAtomic(name string, data []byte) (err error) {
 	}()
 
 	if err := temporary.Chmod(stateFileMode); err != nil {
-		return fmt.Errorf("secure temporary %s file: %w", name, err)
+		return fmt.Errorf("secure temporary %s file: %w", base, err)
 	}
 	if _, err := temporary.Write(data); err != nil {
-		return fmt.Errorf("write temporary %s file: %w", name, err)
+		return fmt.Errorf("write temporary %s file: %w", base, err)
 	}
 	if err := temporary.Sync(); err != nil {
-		return fmt.Errorf("sync temporary %s file: %w", name, err)
+		return fmt.Errorf("sync temporary %s file: %w", base, err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary %s file: %w", name, err)
+		return fmt.Errorf("close temporary %s file: %w", base, err)
 	}
-	if err := os.Rename(temporaryName, s.path(name)); err != nil {
-		return fmt.Errorf("replace %s file: %w", name, err)
+	if err := os.Rename(temporaryName, target); err != nil {
+		return fmt.Errorf("replace %s file: %w", base, err)
 	}
 
 	return nil

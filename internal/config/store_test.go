@@ -41,7 +41,7 @@ func TestStateDirPrecedence(t *testing.T) {
 	}
 }
 
-func TestStoreReadsConfigurationAndEnvironmentOverride(t *testing.T) {
+func TestStoreReadsConfiguration(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "url"), []byte("  https://file.example/prefix  \n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -50,12 +50,12 @@ func TestStoreReadsConfigurationAndEnvironmentOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := NewStore(dir, mapEnv(map[string]string{"SAT_BASE_URL": " https://env.example/base "}))
+	store := NewStore(dir, mapEnv(nil))
 	baseURL, err := store.BaseURL()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if baseURL != "https://env.example/base" {
+	if baseURL != "https://file.example/prefix" {
 		t.Fatalf("BaseURL() = %q", baseURL)
 	}
 	token, err := store.Token()
@@ -68,15 +68,112 @@ func TestStoreReadsConfigurationAndEnvironmentOverride(t *testing.T) {
 	if !store.HasBaseURL() || !store.HasToken() {
 		t.Fatal("expected existing configuration to be reported")
 	}
+}
 
-	store = NewStore(dir, mapEnv(nil))
-	baseURL, err = store.BaseURL()
+func TestStoreURLPathPrecedenceOnRead(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "url"), []byte("https://file.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	override := filepath.Join(t.TempDir(), "url-override")
+	if err := os.WriteFile(override, []byte("https://override.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(dir, mapEnv(map[string]string{"SAT_URL_PATH": override}))
+	baseURL, err := store.BaseURL()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if baseURL != "https://file.example/prefix" {
-		t.Fatalf("file BaseURL() = %q", baseURL)
+	if baseURL != "https://override.example" {
+		t.Fatalf("BaseURL() = %q, want override", baseURL)
 	}
+	if !store.HasBaseURL() {
+		t.Fatal("override URL not reported as present")
+	}
+}
+
+func TestStoreTokenPathPrecedenceOnRead(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "token"), []byte("file-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	override := filepath.Join(t.TempDir(), "token-override")
+	if err := os.WriteFile(override, []byte("override-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(dir, mapEnv(map[string]string{"SAT_TOKEN_PATH": override}))
+	token, err := store.Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "override-token" {
+		t.Fatalf("Token() = %q, want override", token)
+	}
+	if !store.HasToken() {
+		t.Fatal("override token not reported as present")
+	}
+}
+
+func TestStoreWritesThroughPathOverrides(t *testing.T) {
+	dir := t.TempDir()
+	urlOverride := filepath.Join(t.TempDir(), "url-override")
+	tokenOverride := filepath.Join(t.TempDir(), "token-override")
+
+	store := NewStore(dir, mapEnv(map[string]string{
+		"SAT_URL_PATH":   urlOverride,
+		"SAT_TOKEN_PATH": tokenOverride,
+	}))
+	if err := store.SetBaseURL("https://override.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetToken("override-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	if data, err := os.ReadFile(urlOverride); err != nil || strings.TrimSpace(string(data)) != "https://override.example" {
+		t.Fatalf("url override = %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(tokenOverride); err != nil || strings.TrimSpace(string(data)) != "override-token" {
+		t.Fatalf("token override = %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "url")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default url file was written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "token")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default token file was written: %v", err)
+	}
+}
+
+func TestStoreMissingPathOverride(t *testing.T) {
+	urlOverride := filepath.Join(t.TempDir(), "missing-url")
+	tokenOverride := filepath.Join(t.TempDir(), "missing-token")
+
+	store := NewStore(t.TempDir(), mapEnv(map[string]string{
+		"SAT_URL_PATH":   urlOverride,
+		"SAT_TOKEN_PATH": tokenOverride,
+	}))
+	if _, err := store.BaseURL(); !errors.Is(err, ErrBaseURLMissing) {
+		t.Fatalf("BaseURL() error = %v", err)
+	}
+	if _, err := store.Token(); !errors.Is(err, ErrTokenMissing) {
+		t.Fatalf("Token() error = %v", err)
+	}
+	if store.HasBaseURL() || store.HasToken() {
+		t.Fatal("missing override reported as present")
+	}
+}
+
+func TestStoreCreatesNestedOverrideDirectory(t *testing.T) {
+	urlOverride := filepath.Join(t.TempDir(), "nested", "deeper", "url")
+	store := NewStore(t.TempDir(), mapEnv(map[string]string{"SAT_URL_PATH": urlOverride}))
+
+	if err := store.SetBaseURL("https://override.example"); err != nil {
+		t.Fatal(err)
+	}
+	assertPerm(t, filepath.Dir(urlOverride), 0o700)
+	assertPerm(t, urlOverride, 0o600)
 }
 
 func TestStoreMissingConfiguration(t *testing.T) {
@@ -106,7 +203,9 @@ func TestStoreRejectsMalformedBaseURL(t *testing.T) {
 		t.Fatalf("invalid URL created a file: %v", err)
 	}
 
-	store = NewStore(dir, mapEnv(map[string]string{"SAT_BASE_URL": "not-a-url"}))
+	if err := os.WriteFile(filepath.Join(dir, "url"), []byte("not-a-url\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.BaseURL(); err == nil || !strings.Contains(err.Error(), "absolute http or https URL") {
 		t.Fatalf("BaseURL() error = %v", err)
 	}

@@ -38,9 +38,10 @@ Requires Go and, for `sat article edit|new`, Neovim. The version shown by
 ## Configuration
 
 State lives in the first of `$SAT_JOURNAL_STATE`, `$XDG_STATE_HOME/sat`,
-`~/.local/state/sat`. `sat login` stores the base URL and token there;
-`SAT_BASE_URL` overrides the saved URL. Existing state files from the shell
-scripts (`url`, `token`, `journals`, `list`, `tracks`, `tmp/`) are reused.
+`~/.local/state/sat`. `sat login` stores the base URL and token there.
+`SAT_URL_PATH` and `SAT_TOKEN_PATH` override where the base URL and token are
+read from and written to. Existing state files from the shell scripts (`url`,
+`token`, `journals`, `list`, `tracks`, `tmp/`) are reused.
 
 `sat run` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
 to a host and release directory derived from the base URL.
