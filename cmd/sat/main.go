@@ -11,11 +11,16 @@ import (
 	"github.com/mantas6/sat-cli/internal/command"
 )
 
+// version is overridden at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	root := command.NewRootCommand(command.NewDefaultApp())
+	app := command.NewDefaultApp()
+	app.Version = version
+	root := command.NewRootCommand(app)
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		exit(err)

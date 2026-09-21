@@ -1,0 +1,55 @@
+# sat
+
+Command-line client for Satellite. A single Go binary that replaces the former
+collection of shell scripts (`arl`, `arr`, `ara`, `arw`, `dashb`, `sat-play`,
+`wt`, `sat-notify`, `sat-login`, ...).
+
+## Commands
+
+```text
+sat login [--replace-url] [--url-only]
+sat config path|url|token
+
+sat article read [query] [--id ID] [--raw]
+sat article edit [query] [--id ID]
+sat article new
+sat article assign ID [journal]
+
+sat music sync
+sat music play [query] [--id ID]
+sat music pause|resume|next|previous
+
+sat dashboard [--follow [5s]]
+sat weather [place]
+sat notify MESSAGE [--expire "+2 days"]
+sat ssh [artisan arguments...]
+```
+
+Run `sat <command> --help` for details.
+
+## Install
+
+```sh
+bin/install            # builds and installs into $DOTS_DIR/opt/sat/bin
+bin/install ~/.local/bin
+```
+
+Requires Go and, for `sat article edit|new`, Neovim.
+
+## Configuration
+
+State lives in the first of `$SAT_JOURNAL_STATE`, `$XDG_STATE_HOME/sat`,
+`~/.local/state/sat`. `sat login` stores the base URL and token there;
+`SAT_BASE_URL` overrides the saved URL. Existing state files from the shell
+scripts (`url`, `token`, `journals`, `list`, `tracks`, `tmp/`) are reused.
+
+`sat ssh` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
+to a host and release directory derived from the base URL.
+
+## Development
+
+```sh
+go test ./...
+go vet ./...
+go build ./cmd/sat
+```
