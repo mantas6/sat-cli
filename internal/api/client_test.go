@@ -50,7 +50,7 @@ func TestClientMethods(t *testing.T) {
 		case "GET /api/journals":
 			writeJSON(t, writer, []Journal{{ID: 3, Title: "Work"}})
 		case "GET /api/albums/saved":
-			_, _ = io.WriteString(writer, `{"data":[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]}`)
+			_, _ = io.WriteString(writer, `[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]`)
 		case "PUT /api/albums/play/track%2Fid", "PUT /api/albums/control/next":
 			writer.WriteHeader(http.StatusNoContent)
 		case "GET /api/dash":

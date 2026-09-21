@@ -28,9 +28,7 @@ type articleJournalRequest struct {
 	Journal string `json:"journal"`
 }
 
-// SavedTracksResponse is the response from the saved albums endpoint.
-type SavedTracksResponse struct {
-	Data []struct {
-		Line string `json:"line"`
-	} `json:"data"`
+// SavedTrack is a single saved-track line from the saved albums endpoint.
+type SavedTrack struct {
+	Line string `json:"line"`
 }

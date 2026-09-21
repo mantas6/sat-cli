@@ -56,14 +56,14 @@ func (c *Client) ListJournals(ctx context.Context) ([]Journal, error) {
 
 // SavedTracks returns the legacy tab-delimited saved-track lines.
 func (c *Client) SavedTracks(ctx context.Context) ([]string, error) {
-	var response SavedTracksResponse
-	if err := c.GetJSON(ctx, "/api/albums/saved", nil, &response); err != nil {
+	var tracks []SavedTrack
+	if err := c.GetJSON(ctx, "/api/albums/saved", nil, &tracks); err != nil {
 		return nil, err
 	}
 
-	lines := make([]string, len(response.Data))
-	for index, item := range response.Data {
-		lines[index] = item.Line
+	lines := make([]string, len(tracks))
+	for index, track := range tracks {
+		lines[index] = track.Line
 	}
 
 	return lines, nil
