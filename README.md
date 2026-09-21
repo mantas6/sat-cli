@@ -43,7 +43,9 @@ read from and written to. Existing state files from the shell scripts (`url`,
 `token`, `journals`, `list`, `tracks`, `tmp/`) are reused.
 
 `sat run` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
-to a host and release directory derived from the base URL.
+to a host and release directory derived from the base URL. It forwards
+SIGINT/SIGTERM to the remote ssh session and exits with `128+signal` when the
+session is terminated by a signal.
 
 ## Development
 
