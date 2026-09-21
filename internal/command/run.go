@@ -69,11 +69,21 @@ func newRunCommand(app *App) *cobra.Command {
 			}
 			sshArgs = append(sshArgs, destination, remoteCommand)
 
-			// ExecRunner uses exec.CommandContext, so command cancellation terminates ssh.
+			// ExecRunner forwards signals to ssh and terminates it gracefully on
+			// context cancellation rather than hard-killing the process.
 			err = app.Runner.Run(command.Context(), sshBinary, sshArgs, app.Stdin, app.Stdout, app.Stderr)
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
-				return ExitError{Code: exitErr.ExitCode(), Err: err}
+				code := exitErr.ExitCode()
+				if code == -1 {
+					// Killed by a signal; map to the conventional 128+signal code.
+					if signalCode, ok := signalExitCode(exitErr); ok {
+						code = signalCode
+					} else {
+						code = 130
+					}
+				}
+				return ExitError{Code: code, Err: err}
 			}
 			return err
 		},

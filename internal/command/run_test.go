@@ -8,8 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 type recordingSSHRunner struct {
@@ -187,6 +190,75 @@ func TestSSHCommandPreservesExitCode(t *testing.T) {
 	}
 	if !errors.Is(err, execErr) {
 		t.Fatalf("Execute() error does not wrap process error")
+	}
+}
+
+func TestSSHCommandMapsSignalExitToConventionalCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal termination semantics are unix-specific")
+	}
+
+	// A process that kills itself with SIGTERM exits via a signal, so
+	// ExitCode reports -1 and the command must map it to 128+SIGTERM.
+	execErr := exec.Command("sh", "-c", "kill -TERM $$").Run()
+	var processErr *exec.ExitError
+	if !errors.As(execErr, &processErr) {
+		t.Fatalf("test setup error = %v, want *exec.ExitError", execErr)
+	}
+	if processErr.ExitCode() != -1 {
+		t.Fatalf("ExitCode() = %d, want -1 (signalled)", processErr.ExitCode())
+	}
+
+	runner := &recordingSSHRunner{err: execErr}
+	app := newSSHTestApp(runner, map[string]string{
+		"REMOTE_HOST": "server",
+		"REMOTE_ROOT": "/srv/current",
+	})
+	err := executeRunTestCommand(app, "run")
+	var exitErr ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 128+int(syscall.SIGTERM) {
+		t.Fatalf("Execute() error = %#v, want ExitError with code %d", err, 128+int(syscall.SIGTERM))
+	}
+	if !errors.Is(err, execErr) {
+		t.Fatalf("Execute() error does not wrap process error")
+	}
+}
+
+func TestExecRunnerForwardsCancellationAsSignal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal forwarding is unix-specific")
+	}
+
+	original := termGracePeriod
+	termGracePeriod = 100 * time.Millisecond
+	t.Cleanup(func() { termGracePeriod = original })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- ExecRunner{}.Run(ctx, "sleep", []string{"10"}, nil, io.Discard, io.Discard)
+	}()
+
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	select {
+	case err := <-result:
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("Run() error = %v, want *exec.ExitError", err)
+		}
+		code, ok := signalExitCode(exitErr)
+		if !ok {
+			t.Fatalf("signalExitCode() reported no signal for %v", exitErr)
+		}
+		if code != 128+int(syscall.SIGTERM) {
+			t.Fatalf("derived exit code = %d, want %d", code, 128+int(syscall.SIGTERM))
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("Run() did not return after context cancellation")
 	}
 }
 
