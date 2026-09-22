@@ -10,9 +10,11 @@ import (
 
 type memoryConfig struct {
 	ConfigStore
-	dir     string
-	baseURL string
-	token   string
+	dir       string
+	baseURL   string
+	token     string
+	urlPath   string
+	tokenPath string
 }
 
 func (c *memoryConfig) BaseURL() (string, error) {
@@ -51,3 +53,7 @@ func (c *memoryConfig) SetToken(value string) error {
 func (c *memoryConfig) HasBaseURL() bool { return c.baseURL != "" }
 func (c *memoryConfig) HasToken() bool   { return c.token != "" }
 func (c *memoryConfig) Dir() string      { return c.dir }
+func (c *memoryConfig) URLPath() string  { return c.urlPath }
+func (c *memoryConfig) TokenPath() string {
+	return c.tokenPath
+}

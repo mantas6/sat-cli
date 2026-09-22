@@ -28,7 +28,7 @@ func (e *HTTPError) Error() string {
 
 	switch e.Status {
 	case http.StatusUnauthorized:
-		message += "; token is invalid or expired; run `sat login`"
+		message += "; token is invalid or expired; run `sat auth login`"
 	case http.StatusForbidden:
 		message += "; token lacks the required ability"
 	}

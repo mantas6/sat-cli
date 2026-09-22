@@ -23,10 +23,6 @@ var (
 	restoreTerminal  = term.Restore
 )
 
-func init() {
-	registerCommand(newLoginCommand)
-}
-
 func newLoginCommand(app *App) *cobra.Command {
 	var replaceURL bool
 	var urlOnly bool

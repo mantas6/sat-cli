@@ -83,6 +83,8 @@ func (s *stubConfig) HasBaseURL() bool                              { return s.b
 func (s *stubConfig) HasToken() bool                                { return s.token != "" }
 func (s *stubConfig) TmpDir() (string, error)                       { return "", nil }
 func (s *stubConfig) Dir() string                                   { return "" }
+func (s *stubConfig) URLPath() string                               { return "" }
+func (s *stubConfig) TokenPath() string                             { return "" }
 func (s *stubConfig) ReadCacheLines(string) ([]string, bool, error) { return nil, false, nil }
 func (s *stubConfig) WriteCacheLines(string, []string) error        { return nil }
 func (s *stubConfig) RemoveCache(string) error                      { return nil }

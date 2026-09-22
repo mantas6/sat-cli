@@ -16,9 +16,9 @@ const (
 
 var (
 	// ErrBaseURLMissing indicates that no server URL has been configured.
-	ErrBaseURLMissing = errors.New("URL is not configured. Run `sat login`.")
+	ErrBaseURLMissing = errors.New("URL is not configured. Run `sat auth login`.")
 	// ErrTokenMissing indicates that no API token has been configured.
-	ErrTokenMissing = errors.New("Token is not configured. Run `sat login`.")
+	ErrTokenMissing = errors.New("Token is not configured. Run `sat auth login`.")
 )
 
 // Store reads and writes configuration and caches under one state directory.
@@ -91,6 +91,18 @@ func (s *Store) HasBaseURL() bool {
 func (s *Store) HasToken() bool {
 	value, err := os.ReadFile(s.tokenPath())
 	return err == nil && strings.TrimSpace(string(value)) != ""
+}
+
+// URLPath returns the file the base URL is read from and written to, honouring
+// the SAT_URL_PATH override.
+func (s *Store) URLPath() string {
+	return s.urlPath()
+}
+
+// TokenPath returns the file the token is read from and written to, honouring
+// the SAT_TOKEN_PATH override.
+func (s *Store) TokenPath() string {
+	return s.tokenPath()
 }
 
 // urlPath returns the file the base URL is read from and written to. It honours

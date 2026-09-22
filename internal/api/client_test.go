@@ -171,7 +171,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{http.StatusUnauthorized, `{"message":"bad credentials"}`, "token is invalid or expired; run `sat login`"},
+		{http.StatusUnauthorized, `{"message":"bad credentials"}`, "token is invalid or expired; run `sat auth login`"},
 		{http.StatusForbidden, `{"message":"ability denied"}`, "token lacks the required ability"},
 		{http.StatusUnprocessableEntity, `{"message":"The contents field is required."}`, "The contents field is required."},
 		{http.StatusInternalServerError, "server exploded", "server exploded"},

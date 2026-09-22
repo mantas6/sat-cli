@@ -26,6 +26,8 @@ type ConfigStore interface {
 	HasToken() bool
 	TmpDir() (string, error)
 	Dir() string
+	URLPath() string
+	TokenPath() string
 	ReadCacheLines(string) ([]string, bool, error)
 	WriteCacheLines(string, []string) error
 	RemoveCache(string) error
