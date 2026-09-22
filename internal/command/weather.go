@@ -13,9 +13,10 @@ func init() {
 
 func newWeatherCommand(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "weather [place]",
-		Short: "Show the weather forecast",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "weather [place]",
+		Aliases: []string{"wt"},
+		Short:   "Show the weather forecast",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			place := "vilnius"
 			if len(args) == 1 {

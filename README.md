@@ -9,7 +9,7 @@ collection of shell scripts (`arl`, `arr`, `ara`, `arw`, `dashb`, `sat-play`,
 ```text
 sat login [--replace-url] [--url-only]
 
-sat article read [query] [--id ID] [--raw]
+sat article read [query] [--id ID] [--raw]   # alias: arl
 sat article edit [query] [--id ID]
 sat article new
 
@@ -17,8 +17,8 @@ sat music sync
 sat music play [query] [--id ID]
 sat music pause|resume|next|previous
 
-sat dashboard [--follow [5s]]
-sat weather [place]
+sat dashboard [--follow [5s]]                 # alias: dash
+sat weather [place]                           # alias: wt
 sat notify MESSAGE
 sat run [artisan arguments...]
 ```

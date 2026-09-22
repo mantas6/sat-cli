@@ -22,8 +22,9 @@ func init() {
 
 func newArticleCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
-		Use:   "article",
-		Short: "Read and write journal articles",
+		Use:     "article",
+		Aliases: []string{"arl"},
+		Short:   "Read and write journal articles",
 		RunE: func(command *cobra.Command, _ []string) error {
 			return command.Help()
 		},

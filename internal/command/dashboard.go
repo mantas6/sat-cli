@@ -31,8 +31,9 @@ func init() {
 func newDashboardCommand(app *App) *cobra.Command {
 	var follow time.Duration
 	command := &cobra.Command{
-		Use:   "dashboard [interval]",
-		Short: "Show the dashboard",
+		Use:     "dashboard [interval]",
+		Aliases: []string{"dash"},
+		Short:   "Show the dashboard",
 		Long: "Show the dashboard once, or refresh it in a full-screen terminal.\n\n" +
 			"With --follow, an optional positional duration may be used, for example `sat dashboard --follow 10s`.",
 		Args: cobra.MaximumNArgs(1),
