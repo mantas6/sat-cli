@@ -35,7 +35,9 @@ type SelectOptions struct {
 var ErrCancelled = errors.New("selection cancelled")
 
 // Select runs the interactive selector on the given terminal streams and
-// returns the chosen item.
+// returns the chosen item. The selector uses a bottom-up (fzf-style) layout:
+// rows render above the filter prompt with index 0 nearest the prompt, so
+// "up" moves towards later items and "down" moves towards the best match.
 func Select(ctx context.Context, in io.Reader, out io.Writer, items []Item, opts SelectOptions) (Item, error) {
 	item, done, err := Resolve(items, opts.Query)
 	if err != nil || done {
@@ -102,6 +104,10 @@ func filterItems(items []Item, query string) []Item {
 	return filtered
 }
 
+// selectorModel renders a bottom-up selector: visible rows are drawn above the
+// filter input, with index 0 immediately above the prompt and higher indices
+// stacking upwards. cursor and offset remain plain item indices; only the View
+// and the navigation key directions are inverted to match the layout.
 type selectorModel struct {
 	title        string
 	items        []Item
@@ -175,16 +181,16 @@ func (m *selectorModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "up", "ctrl+p":
-			m.move(-1)
-			return m, nil
-		case "down", "ctrl+n":
 			m.move(1)
 			return m, nil
+		case "down", "ctrl+n":
+			m.move(-1)
+			return m, nil
 		case "pgup":
-			m.movePage(-1)
+			m.movePage(1)
 			return m, nil
 		case "pgdown":
-			m.movePage(1)
+			m.movePage(-1)
 			return m, nil
 		}
 	}
@@ -202,25 +208,27 @@ func (m *selectorModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *selectorModel) View() string {
 	var lines []string
+
+	if len(m.filtered) == 0 {
+		lines = append(lines, "No matches.")
+	} else {
+		// Render rows bottom-up: the highest visible index sits at the top and
+		// index 0 (the best match) lands directly above the prompt.
+		end := min(len(m.filtered), m.offset+m.visibleRows())
+		widths := columnWidths(m.filtered[m.offset:end], max(1, m.width-2))
+		for index := end - 1; index >= m.offset; index-- {
+			prefix := "  "
+			if index == m.cursor {
+				prefix = "> "
+			}
+			lines = append(lines, prefix+renderColumns(m.filtered[index].Columns, widths))
+		}
+	}
+
 	if m.title != "" {
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.title))
 	}
 	lines = append(lines, m.input.View())
-
-	if len(m.filtered) == 0 {
-		lines = append(lines, "No matches.")
-		return strings.Join(lines, "\n") + "\n"
-	}
-
-	end := min(len(m.filtered), m.offset+m.visibleRows())
-	widths := columnWidths(m.filtered[m.offset:end], max(1, m.width-2))
-	for index := m.offset; index < end; index++ {
-		prefix := "  "
-		if index == m.cursor {
-			prefix = "> "
-		}
-		lines = append(lines, prefix+renderColumns(m.filtered[index].Columns, widths))
-	}
 	return strings.Join(lines, "\n") + "\n"
 }
 

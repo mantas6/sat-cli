@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestFilterItemsRanksMatchesAndKeepsTiesStable(t *testing.T) {
@@ -35,7 +36,7 @@ func TestSelectorSelectsStableIDAfterFiltering(t *testing.T) {
 		{ID: "three", Columns: []string{"Beta"}},
 	}, SelectOptions{Query: "Alpha"})
 
-	model.Update(key("down"))
+	model.Update(key("up"))
 	model.Update(key("enter"))
 	selected, err := model.selection()
 	if err != nil {
@@ -53,25 +54,50 @@ func TestSelectorNavigationWrapsAndPagesAreBounded(t *testing.T) {
 	}
 	model := newSelectorModel(items, SelectOptions{Height: 6})
 
-	model.Update(key("up"))
-	if model.cursor != 7 {
-		t.Fatalf("cursor after up = %d, want 7", model.cursor)
-	}
 	model.Update(key("down"))
-	if model.cursor != 0 {
-		t.Fatalf("cursor after down = %d, want 0", model.cursor)
-	}
-	model.Update(key("pgdown"))
-	model.Update(key("pgdown"))
-	model.Update(key("pgdown"))
 	if model.cursor != 7 {
-		t.Fatalf("cursor after page down = %d, want 7", model.cursor)
+		t.Fatalf("cursor after down = %d, want 7", model.cursor)
+	}
+	model.Update(key("up"))
+	if model.cursor != 0 {
+		t.Fatalf("cursor after up = %d, want 0", model.cursor)
 	}
 	model.Update(key("pgup"))
 	model.Update(key("pgup"))
 	model.Update(key("pgup"))
+	if model.cursor != 7 {
+		t.Fatalf("cursor after page up = %d, want 7", model.cursor)
+	}
+	model.Update(key("pgdown"))
+	model.Update(key("pgdown"))
+	model.Update(key("pgdown"))
 	if model.cursor != 0 {
-		t.Fatalf("cursor after page up = %d, want 0", model.cursor)
+		t.Fatalf("cursor after page down = %d, want 0", model.cursor)
+	}
+}
+
+func TestSelectorViewRendersBottomUp(t *testing.T) {
+	model := newSelectorModel([]Item{
+		{ID: "a", Columns: []string{"A"}},
+		{ID: "b", Columns: []string{"B"}},
+		{ID: "c", Columns: []string{"C"}},
+	}, SelectOptions{})
+
+	lines := strings.Split(strings.TrimRight(model.View(), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("View() produced %d lines, want 4: %q", len(lines), lines)
+	}
+	if lines[0] != "  C" || lines[1] != "  B" || lines[2] != "> A" {
+		t.Fatalf("View() rows = %q, want bottom-up order [  C   B > A]", lines[:3])
+	}
+	if !strings.Contains(ansi.Strip(lines[3]), "Filter") {
+		t.Fatalf("last line = %q, want the filter input", lines[3])
+	}
+
+	model.Update(key("up"))
+	lines = strings.Split(strings.TrimRight(model.View(), "\n"), "\n")
+	if lines[1] != "> B" || lines[2] != "  A" {
+		t.Fatalf("after up, rows = %q, want marker on B", lines[:3])
 	}
 }
 
