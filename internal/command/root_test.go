@@ -17,6 +17,33 @@ func TestRootHelpAndVersion(t *testing.T) {
 	if got := output.String(); !strings.Contains(got, "Command-line client for Satellite") {
 		t.Fatalf("help output = %q", got)
 	}
+	help := output.String()
+	if !strings.Contains(help, "Environment:") {
+		t.Fatalf("help output missing Environment block: %q", help)
+	}
+	for _, name := range []string{
+		"SAT_JOURNAL_STATE",
+		"XDG_STATE_HOME",
+		"SAT_URL_PATH",
+		"SAT_TOKEN_PATH",
+		"REMOTE_HOST",
+		"REMOTE_USER",
+		"REMOTE_ROOT",
+	} {
+		if !strings.Contains(help, name) {
+			t.Fatalf("help output missing %s: %q", name, help)
+		}
+	}
+
+	output.Reset()
+	root = NewRootCommand(app)
+	root.SetArgs([]string{"weather", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); strings.Contains(got, "Environment:") {
+		t.Fatalf("weather help should not contain Environment block: %q", got)
+	}
 
 	output.Reset()
 	root = NewRootCommand(app)
