@@ -2,8 +2,16 @@ package command
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	configpkg "github.com/mantas6/sat-cli/internal/config"
+	"golang.org/x/term"
 )
 
 func TestLoginPromptsForMissingURLAndToken(t *testing.T) {
@@ -100,6 +108,180 @@ func TestLoginReadsNonInteractiveTokenFromStdin(t *testing.T) {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
+
+func TestLoginTokenPromptCancels(t *testing.T) {
+	config := &memoryConfig{baseURL: "https://sat.example"}
+
+	stdin, cleanupStdin := terminalFile(t)
+	defer cleanupStdin()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	restoreReadPassword := readPassword
+	readPassword = func(int) ([]byte, error) {
+		close(started)
+		<-release
+		return nil, io.EOF
+	}
+	defer func() { readPassword = restoreReadPassword }()
+
+	restoreGetState := getTerminalState
+	getTerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
+	defer func() { getTerminalState = restoreGetState }()
+
+	restored := make(chan struct{}, 1)
+	restoreRestore := restoreTerminal
+	restoreTerminal = func(int, *term.State) error {
+		restored <- struct{}{}
+		return nil
+	}
+	defer func() { restoreTerminal = restoreRestore }()
+
+	app := &App{
+		Config:     config,
+		Stdin:      stdin,
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+		IsTerminal: func(int) bool { return true },
+	}
+	command := newLoginCommand(app)
+	command.SetArgs(nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- command.ExecuteContext(ctx) }()
+
+	<-started
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("login did not cancel in time")
+	}
+
+	select {
+	case <-restored:
+	default:
+		t.Fatal("restoreTerminal was not called")
+	}
+
+	if config.token != "" || config.baseURL != "https://sat.example" {
+		t.Fatalf("config changed to URL %q, token %q", config.baseURL, config.token)
+	}
+}
+
+func TestLoginTokenPromptEOFReturnsMissing(t *testing.T) {
+	config := &memoryConfig{baseURL: "https://sat.example"}
+
+	stdin, cleanupStdin := terminalFile(t)
+	defer cleanupStdin()
+
+	restoreReadPassword := readPassword
+	readPassword = func(int) ([]byte, error) { return nil, io.EOF }
+	defer func() { readPassword = restoreReadPassword }()
+
+	restoreGetState := getTerminalState
+	getTerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
+	defer func() { getTerminalState = restoreGetState }()
+
+	restoreRestore := restoreTerminal
+	restoreTerminal = func(int, *term.State) error { return nil }
+	defer func() { restoreTerminal = restoreRestore }()
+
+	app := &App{
+		Config:     config,
+		Stdin:      stdin,
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+		IsTerminal: func(int) bool { return true },
+	}
+	command := newLoginCommand(app)
+	command.SetArgs(nil)
+
+	err := command.Execute()
+	if !errors.Is(err, configpkg.ErrTokenMissing) {
+		t.Fatalf("err = %v, want ErrTokenMissing", err)
+	}
+	if config.token != "" {
+		t.Fatalf("token = %q", config.token)
+	}
+}
+
+func TestLoginURLPromptCancels(t *testing.T) {
+	config := &memoryConfig{}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	var startedOnce bool
+	reader := readerFunc(func(p []byte) (int, error) {
+		if !startedOnce {
+			startedOnce = true
+			close(started)
+		}
+		<-release
+		return 0, io.EOF
+	})
+
+	app := &App{
+		Config:     config,
+		Stdin:      reader,
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+		IsTerminal: func(int) bool { return false },
+	}
+	command := newLoginCommand(app)
+	command.SetArgs(nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- command.ExecuteContext(ctx) }()
+
+	<-started
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("login did not cancel in time")
+	}
+
+	if config.baseURL != "" || config.token != "" {
+		t.Fatalf("config changed to URL %q, token %q", config.baseURL, config.token)
+	}
+}
+
+// terminalFile returns a real *os.File (the read end of a pipe) so the hidden
+// token path is taken; readPassword itself is stubbed, so nothing is read.
+func terminalFile(t *testing.T) (*os.File, func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	return r, func() {
+		r.Close()
+		w.Close()
+	}
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
 
 func executeLogin(config *memoryConfig, input string, args ...string) (string, error) {
 	var stderr bytes.Buffer

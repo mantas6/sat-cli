@@ -2,6 +2,7 @@ package command
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +15,13 @@ import (
 
 const maxURLPromptAttempts = 3
 
-var readPassword = term.ReadPassword
+// These are package-level vars so tests can inject fakes for the terminal
+// interactions that would otherwise require a real TTY.
+var (
+	readPassword     = term.ReadPassword
+	getTerminalState = term.GetState
+	restoreTerminal  = term.Restore
+)
 
 func init() {
 	registerCommand(newLoginCommand)
@@ -34,9 +41,10 @@ even when configured. The token is always prompted for and replaced; use
 --url-only to prompt for and replace only the URL. Piped input is read as plain
 text, while token input from a terminal is hidden.`,
 		Args: cobra.ExactArgs(0),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			prompter := loginPrompter{
 				app:    app,
+				ctx:    cmd.Context(),
 				reader: bufio.NewReader(app.Stdin),
 			}
 
@@ -72,6 +80,7 @@ text, while token input from a terminal is hidden.`,
 
 type loginPrompter struct {
 	app    *App
+	ctx    context.Context
 	reader *bufio.Reader
 }
 
@@ -110,14 +119,18 @@ func (p loginPrompter) promptToken() error {
 		if _, err := fmt.Fprint(p.app.Stderr, "Token: "); err != nil {
 			return err
 		}
-		password, err := readPassword(int(file.Fd()))
+		password, err := p.readHiddenToken(int(file.Fd()))
+		// Terminate the "Token: " line so a cancelled prompt (or the hidden
+		// input) is not glued to the next shell prompt.
 		if _, writeErr := fmt.Fprintln(p.app.Stderr); writeErr != nil {
 			return writeErr
 		}
-		if err != nil {
+		value = string(password)
+		// Ctrl+D with no input surfaces as io.EOF; fall through to SetToken so
+		// the user sees ErrTokenMissing instead of "read token: EOF".
+		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("read token: %w", err)
 		}
-		value = string(password)
 	} else {
 		line, err := p.readLine("Token: ")
 		if err != nil {
@@ -129,15 +142,58 @@ func (p loginPrompter) promptToken() error {
 	return p.app.Config.SetToken(strings.TrimSpace(value))
 }
 
+// readHiddenToken reads the token without echo, cancelling on ctx.Done(). Since
+// term.ReadPassword's deferred restore never runs while its blocking read is
+// stuck in the goroutine, capture the terminal state up front and restore it
+// ourselves when the context is cancelled.
+func (p loginPrompter) readHiddenToken(fd int) ([]byte, error) {
+	state, stateErr := getTerminalState(fd)
+	password, err := readWithContext(p.ctx, func() ([]byte, error) {
+		return readPassword(fd)
+	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if stateErr == nil {
+			_ = restoreTerminal(fd, state)
+		}
+	}
+	return password, err
+}
+
 func (p loginPrompter) readLine(prompt string) (string, error) {
 	if _, err := fmt.Fprint(p.app.Stderr, prompt); err != nil {
 		return "", err
 	}
-	value, err := p.reader.ReadString('\n')
+	value, err := readWithContext(p.ctx, func() (string, error) {
+		return p.reader.ReadString('\n')
+	})
 	if errors.Is(err, io.EOF) {
 		err = nil
 	}
 	return value, err
+}
+
+// readWithContext runs a blocking read in a goroutine and returns whichever
+// happens first: the read result or context cancellation. On cancel it returns
+// ctx.Err(); the goroutine is left to unblock on its own once the underlying
+// read returns.
+func readWithContext[T any](ctx context.Context, read func() (T, error)) (T, error) {
+	type result struct {
+		value T
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		value, err := read()
+		ch <- result{value: value, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	case r := <-ch:
+		return r.value, r.err
+	}
 }
 
 func (p loginPrompter) stdinIsTerminal() bool {
