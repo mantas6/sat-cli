@@ -7,7 +7,8 @@ collection of shell scripts (`arl`, `arr`, `ara`, `arw`, `dashb`, `sat-play`,
 ## Commands
 
 ```text
-sat login [--replace-url] [--url-only]
+sat auth                                      # show authentication status
+sat auth login [--replace-url] [--url-only]
 
 sat article read [query] [--id ID] [--raw]   # alias: arl
 sat article edit [query] [--id ID]
@@ -25,6 +26,9 @@ sat run [artisan arguments...]
 
 Run `sat <command> --help` for details.
 
+Interactive pickers are fzf-style: the prompt sits at the bottom, the best match
+appears directly above it, and `up` moves away from the prompt.
+
 ## Build
 
 ```sh
@@ -37,10 +41,18 @@ Requires Go and, for `sat article edit|new`, Neovim. The version shown by
 ## Configuration
 
 State lives in the first of `$SAT_JOURNAL_STATE`, `$XDG_STATE_HOME/sat`,
-`~/.local/state/sat`. `sat login` stores the base URL and token there.
-`SAT_URL_PATH` and `SAT_TOKEN_PATH` override where the base URL and token are
-read from and written to. Existing state files from the shell scripts (`url`,
-`token`, `journals`, `list`, `tracks`, `tmp/`) are reused.
+`~/.local/state/sat`. `sat auth login` stores the base URL and token there, and
+`sat auth` prints the current authentication status (state directory, base URL,
+URL and token file paths, and whether a token is configured) without ever
+revealing the token value. `SAT_URL_PATH` and `SAT_TOKEN_PATH` override where the
+base URL and token are read from and written to; when set, `sat auth` annotates
+the affected paths with `(from SAT_URL_PATH)` / `(from SAT_TOKEN_PATH)`. Existing
+state files from the shell scripts (`url`, `token`, `journals`, `list`, `tracks`,
+`tmp/`) are reused.
+
+`sat --help` lists the environment variables sat honours: `SAT_JOURNAL_STATE`,
+`XDG_STATE_HOME`, `SAT_URL_PATH`, `SAT_TOKEN_PATH`, `REMOTE_HOST`, `REMOTE_USER`
+and `REMOTE_ROOT`.
 
 `sat run` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
 to a host and release directory derived from the base URL. It forwards
