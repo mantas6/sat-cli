@@ -47,8 +47,8 @@ URL and token file paths, and whether a token is configured) without ever
 revealing the token value. `SAT_URL_PATH` and `SAT_TOKEN_PATH` override where the
 base URL and token are read from and written to; when set, `sat auth` annotates
 the affected paths with `(from SAT_URL_PATH)` / `(from SAT_TOKEN_PATH)`. Existing
-state files from the shell scripts (`url`, `token`, `journals`, `list`, `tracks`,
-`tmp/`) are reused.
+state files from the shell scripts (`url`, `token`, `list`, `tracks`,
+`tmp/`) are reused. Journals are always fetched on demand and never cached.
 
 `sat --help` lists the environment variables sat honours: `SAT_JOURNAL_STATE`,
 `XDG_STATE_HOME`, `SAT_URL_PATH`, `SAT_TOKEN_PATH`, `REMOTE_HOST`, `REMOTE_USER`

@@ -110,7 +110,7 @@ func newArticleLifecycleApp(t *testing.T, client APIClient) (*App, *config.Store
 	return app, store, stdout, stderr
 }
 
-func TestArticleAssignCacheHitAvoidsJournalRequestAndInvalidatesArticles(t *testing.T) {
+func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
 	previous := runSelector
 	t.Cleanup(func() { runSelector = previous })
 	var selected []ui.Item
@@ -123,23 +123,24 @@ func TestArticleAssignCacheHitAvoidsJournalRequestAndInvalidatesArticles(t *test
 	}
 
 	var gotID, gotJournal string
+	var journalsCalls int
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, journals: func(context.Context) ([]api.Journal, error) {
-		t.Fatal("ListJournals() called on cache hit")
-		return nil, nil
+		journalsCalls++
+		return []api.Journal{{ID: 3, Title: "Default"}, {ID: 7, Title: "Work"}}, nil
 	}, assign: func(_ context.Context, id, journal string) (api.Article, error) {
 		gotID, gotJournal = id, journal
 		return api.Article{}, nil
 	}}
 	app, store, _, _ := newArticleLifecycleApp(t, client)
-	if err := store.WriteCacheLines(journalCacheName, []string{"Default", "Work"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := store.WriteCacheLines(articleCacheName, []string{"1\tCached"}); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "12", ""); err != nil {
 		t.Fatal(err)
+	}
+	if journalsCalls != 1 {
+		t.Fatalf("ListJournals() calls = %d, want 1", journalsCalls)
 	}
 	if gotID != "12" || gotJournal != "Work" {
 		t.Fatalf("AssignArticleJournal() = (%q, %q), want (12, Work)", gotID, gotJournal)
@@ -153,7 +154,7 @@ func TestArticleAssignCacheHitAvoidsJournalRequestAndInvalidatesArticles(t *test
 	}
 }
 
-func TestArticleAssignCacheMissWritesReturnedOrder(t *testing.T) {
+func TestArticleAssignUsesReturnedJournalOrder(t *testing.T) {
 	previous := runSelector
 	t.Cleanup(func() { runSelector = previous })
 	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, _ ui.SelectOptions) (ui.Item, error) {
@@ -173,12 +174,8 @@ func TestArticleAssignCacheMissWritesReturnedOrder(t *testing.T) {
 	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", ""); err != nil {
 		t.Fatal(err)
 	}
-	lines, exists, err := store.ReadCacheLines(journalCacheName)
-	if err != nil || !exists {
-		t.Fatalf("journal cache exists = %v, error = %v", exists, err)
-	}
-	if want := []string{"Default", "Notes"}; !reflect.DeepEqual(lines, want) {
-		t.Fatalf("journal cache = %#v, want %#v", lines, want)
+	if _, exists, err := store.ReadCacheLines("journals"); err != nil || exists {
+		t.Fatalf("journal cache exists = %v, error = %v; want no cache written", exists, err)
 	}
 }
 

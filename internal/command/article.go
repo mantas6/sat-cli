@@ -11,10 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	articleCacheName = "list"
-	journalCacheName = "journals"
-)
+const articleCacheName = "list"
 
 func init() {
 	registerCommand(newArticleCommand)

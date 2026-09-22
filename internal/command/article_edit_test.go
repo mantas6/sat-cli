@@ -104,7 +104,9 @@ func TestArticleNewSavedAssignsJournal(t *testing.T) {
 	}
 
 	var gotID, gotJournal string
-	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, assign: func(_ context.Context, id, journal string) (api.Article, error) {
+	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, journals: func(context.Context) ([]api.Journal, error) {
+		return []api.Journal{{ID: 1, Title: "Daily"}}, nil
+	}, assign: func(_ context.Context, id, journal string) (api.Article, error) {
 		gotID, gotJournal = id, journal
 		return api.Article{}, nil
 	}}
@@ -115,11 +117,8 @@ func TestArticleNewSavedAssignsJournal(t *testing.T) {
 		}
 		return os.WriteFile(filepath.Join(workDir, "id"), []byte("81\n"), 0o600)
 	}}
-	app, store, _, _ := newArticleLifecycleApp(t, client)
+	app, _, _, _ := newArticleLifecycleApp(t, client)
 	app.Runner = runner
-	if err := store.WriteCacheLines(journalCacheName, []string{"Daily"}); err != nil {
-		t.Fatal(err)
-	}
 
 	if err := executeArticleTestCommand(app, "article", "new"); err != nil {
 		t.Fatal(err)
