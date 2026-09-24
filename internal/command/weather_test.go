@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestWeatherDefaultsToVilniusAndWritesOutput(t *testing.T) {
-	var gotPlace string
+func TestWeatherForwardsEmptyPlaceAndWritesOutput(t *testing.T) {
+	gotPlace := "unset"
 	client := &stubAPI{weather: func(_ context.Context, place string) (string, error) {
 		gotPlace = place
 		return "Cloudy", nil
@@ -17,8 +17,8 @@ func TestWeatherDefaultsToVilniusAndWritesOutput(t *testing.T) {
 	if err := executeWeatherNotifyTestCommand(app, "weather"); err != nil {
 		t.Fatal(err)
 	}
-	if gotPlace != "vilnius" {
-		t.Fatalf("place = %q, want %q", gotPlace, "vilnius")
+	if gotPlace != "" {
+		t.Fatalf("place = %q, want %q", gotPlace, "")
 	}
 	if got := output.String(); got != "Cloudy\n" {
 		t.Fatalf("output = %q, want %q", got, "Cloudy\n")
