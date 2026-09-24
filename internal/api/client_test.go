@@ -165,6 +165,25 @@ func TestWeatherEscapesPlaceAndOmitsAuthentication(t *testing.T) {
 	}
 }
 
+func TestWeatherWithoutPlaceOmitsSegmentAndAuthentication(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.EscapedPath() != "/api/wt" {
+			t.Errorf("escaped path = %q", request.URL.EscapedPath())
+		}
+		if authorization := request.Header.Get("Authorization"); authorization != "" {
+			t.Errorf("public request has authorization %q", authorization)
+		}
+		_, _ = io.WriteString(writer, "sunny")
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "do-not-send")
+	weather, err := client.Weather(context.Background(), "")
+	if err != nil || weather != "sunny" {
+		t.Fatalf("Weather() = %q, %v", weather, err)
+	}
+}
+
 func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 	tests := []struct {
 		status int

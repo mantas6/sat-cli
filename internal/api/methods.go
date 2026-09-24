@@ -104,7 +104,11 @@ func (c *Client) Dashboard(ctx context.Context) (string, error) {
 // Weather returns a public plain-text forecast. Redirects follow the configured
 // HTTP client's policy because this request never carries authentication.
 func (c *Client) Weather(ctx context.Context, place string) (string, error) {
-	data, err := c.GetTextUnauthenticated(ctx, JoinPath("api", "wt", place), nil)
+	path := JoinPath("api", "wt")
+	if place != "" {
+		path = JoinPath("api", "wt", place)
+	}
+	data, err := c.GetTextUnauthenticated(ctx, path, nil)
 	return string(data), err
 }
 
