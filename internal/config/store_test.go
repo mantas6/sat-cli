@@ -176,6 +176,31 @@ func TestStoreCreatesNestedOverrideDirectory(t *testing.T) {
 	assertPerm(t, urlOverride, 0o600)
 }
 
+func TestStoreLeavesExistingOverrideParentPermissions(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state")
+	store := NewStore(stateDir, mapEnv(map[string]string{
+		"SAT_URL_PATH":   filepath.Join(parent, "url"),
+		"SAT_TOKEN_PATH": filepath.Join(parent, "token"),
+	}))
+
+	if err := store.SetBaseURL("https://override.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetToken("override-token"); err != nil {
+		t.Fatal(err)
+	}
+	assertPerm(t, parent, 0o755)
+	assertPerm(t, filepath.Join(parent, "url"), 0o600)
+	assertPerm(t, filepath.Join(parent, "token"), 0o600)
+	if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state directory created for override-only writes: %v", err)
+	}
+}
+
 func TestStoreMissingConfiguration(t *testing.T) {
 	store := NewStore(t.TempDir(), mapEnv(nil))
 
@@ -289,9 +314,10 @@ func TestSetTokenFailedWriteKeepsOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Make the state directory unwritable so os.CreateTemp cannot create the
-	// atomic temporary file. writeAtomic re-secures the directory via
-	// ensureDir, so lock the parent to keep the state directory unreachable.
+	// Make the write fail. writeAtomic re-secures the state directory itself
+	// (chmod 0700) via ensureDir, so a read-only state directory alone is not
+	// enough; locking the parent makes the state directory unreachable and
+	// ensureDir fails before any temporary file is created.
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}

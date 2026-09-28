@@ -224,10 +224,18 @@ func ensureDir(dir string) error {
 	return nil
 }
 
+// writeAtomic replaces target via a private temporary file in the same
+// directory. Only the state directory itself is re-secured to 0700; parents of
+// SAT_URL_PATH/SAT_TOKEN_PATH overrides (for example $HOME or /tmp) are created
+// when missing but their existing permissions are left alone.
 func (s *Store) writeAtomic(target string, data []byte) (err error) {
 	dir := filepath.Dir(target)
-	if err := ensureDir(dir); err != nil {
-		return err
+	if filepath.Clean(dir) == filepath.Clean(s.dir) {
+		if err := ensureDir(dir); err != nil {
+			return err
+		}
+	} else if err := os.MkdirAll(dir, stateDirMode); err != nil {
+		return fmt.Errorf("create directory for %s: %w", filepath.Base(target), err)
 	}
 
 	base := filepath.Base(target)
