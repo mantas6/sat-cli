@@ -272,9 +272,19 @@ func (s *Store) path(name string) string {
 	return filepath.Join(s.dir, name)
 }
 
+// reservedStateNames are state-directory entries that are not caches.
+var reservedStateNames = map[string]bool{
+	"token": true,
+	"url":   true,
+	"tmp":   true,
+}
+
 func validateCacheName(name string) error {
-	if name == "" || name == "." || filepath.Base(name) != name {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
 		return fmt.Errorf("invalid cache name %q", name)
+	}
+	if reservedStateNames[name] {
+		return fmt.Errorf("invalid cache name %q: reserved for sat state", name)
 	}
 
 	return nil

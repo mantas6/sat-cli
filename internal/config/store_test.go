@@ -336,6 +336,37 @@ func TestCacheLifecycleAndSplitTabs(t *testing.T) {
 	}
 }
 
+func TestCacheNameValidation(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir, mapEnv(nil))
+	if err := store.SetToken("keep-me"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"", ".", "..", "../outside", "nested/name", "token", "url", "tmp"} {
+		t.Run(name, func(t *testing.T) {
+			if err := store.WriteCacheLines(name, []string{"x"}); err == nil {
+				t.Fatalf("WriteCacheLines(%q) succeeded", name)
+			}
+			if _, _, err := store.ReadCacheLines(name); err == nil {
+				t.Fatalf("ReadCacheLines(%q) succeeded", name)
+			}
+			if err := store.RemoveCache(name); err == nil {
+				t.Fatalf("RemoveCache(%q) succeeded", name)
+			}
+		})
+	}
+
+	if token, err := store.Token(); err != nil || token != "keep-me" {
+		t.Fatalf("Token() = %q, %v; want token untouched", token, err)
+	}
+	for _, name := range []string{"list", "tracks", "journals"} {
+		if err := validateCacheName(name); err != nil {
+			t.Fatalf("validateCacheName(%q) = %v", name, err)
+		}
+	}
+}
+
 func TestSetTokenFailedWriteKeepsOriginal(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores permission bits")
