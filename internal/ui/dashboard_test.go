@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestDashboardModelFetchesImmediatelyAndSchedulesInterval(t *testing.T) {
@@ -44,18 +44,18 @@ func TestDashboardModelUpdatesOnlyWhenVisibleStateChanges(t *testing.T) {
 	model.tick = noDashboardTick
 
 	model.Update(fetchResultMsg{Text: "one"})
-	first := model.View()
+	first := model.View().Content
 	if first != "one" {
 		t.Fatalf("View() = %q, want one", first)
 	}
 
 	model.Update(fetchResultMsg{Text: "one"})
-	if got := model.View(); got != first {
+	if got := model.View().Content; got != first {
 		t.Fatalf("unchanged response changed View() from %q to %q", first, got)
 	}
 
 	model.Update(fetchResultMsg{Text: "two"})
-	if got := model.View(); got != "two" {
+	if got := model.View().Content; got != "two" {
 		t.Fatalf("changed response View() = %q, want two", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestDashboardModelKeepsContentAcrossFailureAndClearsBadgeOnRecovery(t *test
 	model.Update(fetchResultMsg{Text: "last good"})
 
 	model.Update(fetchResultMsg{Err: errors.New("secret token")})
-	failed := model.View()
+	failed := model.View().Content
 	if !strings.Contains(failed, "last good") || !strings.Contains(failed, "<!>") {
 		t.Fatalf("failure View() = %q, want last content and badge", failed)
 	}
@@ -77,7 +77,7 @@ func TestDashboardModelKeepsContentAcrossFailureAndClearsBadgeOnRecovery(t *test
 	}
 
 	model.Update(fetchResultMsg{Text: "recovered"})
-	recovered := model.View()
+	recovered := model.View().Content
 	if recovered != "recovered" || strings.Contains(recovered, "<!>") {
 		t.Fatalf("recovery View() = %q, want recovered content without badge", recovered)
 	}
@@ -90,7 +90,7 @@ func TestDashboardModelTruncatesWidthAndHeight(t *testing.T) {
 	model.tick = noDashboardTick
 	model.Update(fetchResultMsg{Text: "123456789\nabcdef\nthird"})
 
-	lines := strings.Split(model.View(), "\n")
+	lines := strings.Split(model.View().Content, "\n")
 	if len(lines) != 2 || lines[0] != "12345" || lines[1] != "abcde" {
 		t.Fatalf("View() lines = %#v, want two width-5 lines", lines)
 	}
@@ -109,7 +109,7 @@ func TestDashboardModelFailureBadgeTakesLastLine(t *testing.T) {
 	model.Update(fetchResultMsg{Text: "first\nsecond"})
 	model.Update(fetchResultMsg{Err: errors.New("temporary")})
 
-	lines := strings.Split(model.View(), "\n")
+	lines := strings.Split(model.View().Content, "\n")
 	if len(lines) != 2 || lines[0] != "first" || !strings.Contains(lines[1], "<!>") {
 		t.Fatalf("View() lines = %#v, want one content line and badge", lines)
 	}
@@ -124,10 +124,10 @@ func TestDashboardModelIgnoresZeroSizeAndQuits(t *testing.T) {
 		t.Fatalf("size = %dx%d, want 20x10", model.width, model.height)
 	}
 
-	for _, key := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{'q'}},
-		{Type: tea.KeyEsc},
-		{Type: tea.KeyCtrlC},
+	for _, key := range []tea.KeyPressMsg{
+		keyMsg("q"),
+		keyMsg("esc"),
+		keyMsg("ctrl+c"),
 	} {
 		_, command := model.Update(key)
 		if command == nil {

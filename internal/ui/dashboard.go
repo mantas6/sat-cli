@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -35,7 +35,6 @@ func Follow(ctx context.Context, in io.Reader, out io.Writer, fetch Fetcher, opt
 		tea.WithInput(in),
 		tea.WithOutput(out),
 		tea.WithContext(ctx),
-		tea.WithAltScreen(),
 	)
 	_, err := program.Run()
 	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -92,7 +91,7 @@ func (m *dashboardModel) Init() tea.Cmd {
 
 func (m *dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch message.String() {
 		case "q", "esc", "ctrl+c":
 			return m, tea.Quit
@@ -118,7 +117,13 @@ func (m *dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *dashboardModel) View() string {
+func (m *dashboardModel) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	return v
+}
+
+func (m *dashboardModel) render() string {
 	lineLimit := m.height
 	if m.hasError {
 		lineLimit--

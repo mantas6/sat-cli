@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
@@ -138,7 +138,7 @@ func newSelectorModel(items []Item, opts SelectOptions) *selectorModel {
 	if height <= 0 {
 		height = 24
 	}
-	input.Width = max(1, width-2)
+	input.SetWidth(max(1, width-2))
 
 	return &selectorModel{
 		title:    opts.Title,
@@ -161,14 +161,14 @@ func (m *selectorModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// carries no information, so keep the previous or default size.
 		if message.Width > 0 {
 			m.width = message.Width
-			m.input.Width = max(1, m.width-2)
+			m.input.SetWidth(max(1, m.width-2))
 		}
 		if message.Height > 0 {
 			m.height = message.Height
 		}
 		m.keepCursorVisible()
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch message.String() {
 		case "ctrl+c", "esc":
 			m.cancelled = true
@@ -206,7 +206,11 @@ func (m *selectorModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m *selectorModel) View() string {
+func (m *selectorModel) View() tea.View {
+	return tea.NewView(m.render())
+}
+
+func (m *selectorModel) render() string {
 	var lines []string
 
 	if len(m.filtered) == 0 {

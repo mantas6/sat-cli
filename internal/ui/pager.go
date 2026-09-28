@@ -6,9 +6,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 )
 
 // PageOptions configures the initial pager dimensions and title.
@@ -17,13 +17,15 @@ type PageOptions struct {
 	Width, Height int
 }
 
-// RenderMarkdown converts Markdown to styled terminal text at the given width.
-func RenderMarkdown(markdown string, width int) (string, error) {
+// renderMarkdown converts Markdown to styled terminal text at the given width
+// using the dark or light standard style. The style is always explicit so
+// glamour never queries the terminal while bubbletea owns it.
+func renderMarkdown(markdown string, width int, dark bool) (string, error) {
 	if width <= 0 {
 		width = 80
 	}
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStandardStyle(glamourStyle(dark)),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -32,9 +34,16 @@ func RenderMarkdown(markdown string, width int) (string, error) {
 	return renderer.Render(markdown)
 }
 
+func glamourStyle(dark bool) string {
+	if dark {
+		return "dark"
+	}
+	return "light"
+}
+
 // Page shows Markdown in a scrollable full-screen viewport.
 func Page(ctx context.Context, in io.Reader, out io.Writer, content string, opts PageOptions) error {
-	model, err := newPagerModel(content, opts, RenderMarkdown)
+	model, err := newPagerModel(content, opts, renderMarkdown)
 	if err != nil {
 		return err
 	}
@@ -43,7 +52,6 @@ func Page(ctx context.Context, in io.Reader, out io.Writer, content string, opts
 		tea.WithInput(in),
 		tea.WithOutput(out),
 		tea.WithContext(ctx),
-		tea.WithAltScreen(),
 	)
 	final, err := program.Run()
 	if err != nil {
@@ -55,13 +63,14 @@ func Page(ctx context.Context, in io.Reader, out io.Writer, content string, opts
 	return nil
 }
 
-type markdownRenderFunc func(string, int) (string, error)
+type markdownRenderFunc func(markdown string, width int, dark bool) (string, error)
 
 type pagerModel struct {
 	title     string
 	markdown  string
 	width     int
 	height    int
+	dark      bool
 	viewport  viewport.Model
 	render    markdownRenderFunc
 	renderErr error
@@ -78,60 +87,64 @@ func newPagerModel(markdown string, opts PageOptions, render markdownRenderFunc)
 		height = 24
 	}
 	if render == nil {
-		render = RenderMarkdown
+		render = renderMarkdown
 	}
 
-	rendered, err := render(markdown, width)
-	if err != nil {
-		return nil, err
-	}
 	model := &pagerModel{
 		title:    opts.Title,
 		markdown: markdown,
 		width:    width,
 		height:   height,
+		dark:     true,
 		render:   render,
 	}
-	model.viewport = viewport.New(width, model.viewportHeight())
+	rendered, err := render(markdown, width, model.dark)
+	if err != nil {
+		return nil, err
+	}
+	model.viewport = viewport.New(viewport.WithWidth(width), viewport.WithHeight(model.viewportHeight()))
 	model.viewport.SetContent(rendered)
 	return model, nil
 }
 
+// Init asks the terminal for its background colour; the answer arrives as a
+// tea.BackgroundColorMsg and selects the light or dark Markdown style.
 func (m *pagerModel) Init() tea.Cmd {
-	return nil
+	return tea.RequestBackgroundColor
 }
 
 func (m *pagerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
+	case tea.BackgroundColorMsg:
+		if dark := message.IsDark(); dark != m.dark {
+			m.dark = dark
+			return m, m.rerender()
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		widthChanged := message.Width > 0 && message.Width != m.width
 		if message.Width > 0 {
 			m.width = message.Width
-			m.viewport.Width = message.Width
+			m.viewport.SetWidth(message.Width)
 		}
 		if message.Height > 0 {
 			m.height = message.Height
-			m.viewport.Height = m.viewportHeight()
+			m.viewport.SetHeight(m.viewportHeight())
 		}
 		if widthChanged {
-			rendered, err := m.render(m.markdown, m.width)
-			if err != nil {
-				m.renderErr = err
-				return m, tea.Quit
-			}
-			m.viewport.SetContent(rendered)
+			return m, m.rerender()
 		}
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch message.String() {
 		case "q", "esc", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
 		case "j", "down":
-			m.viewport.LineDown(1)
+			m.viewport.ScrollDown(1)
 		case "k", "up":
-			m.viewport.LineUp(1)
-		case "pgdown", " ":
+			m.viewport.ScrollUp(1)
+		case "pgdown", "space":
 			m.viewport.PageDown()
 		case "pgup", "b":
 			m.viewport.PageUp()
@@ -156,7 +169,25 @@ func (m *pagerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m *pagerModel) View() string {
+// rerender renders the Markdown for the current width and style, quitting
+// with renderErr set when rendering fails.
+func (m *pagerModel) rerender() tea.Cmd {
+	rendered, err := m.render(m.markdown, m.width, m.dark)
+	if err != nil {
+		m.renderErr = err
+		return tea.Quit
+	}
+	m.viewport.SetContent(rendered)
+	return nil
+}
+
+func (m *pagerModel) View() tea.View {
+	view := tea.NewView(m.content())
+	view.AltScreen = true
+	return view
+}
+
+func (m *pagerModel) content() string {
 	if m.quitting {
 		return ""
 	}

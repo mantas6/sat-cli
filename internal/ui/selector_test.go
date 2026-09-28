@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -36,8 +36,8 @@ func TestSelectorSelectsStableIDAfterFiltering(t *testing.T) {
 		{ID: "three", Columns: []string{"Beta"}},
 	}, SelectOptions{Query: "Alpha"})
 
-	model.Update(key("up"))
-	model.Update(key("enter"))
+	model.Update(keyMsg("up"))
+	model.Update(keyMsg("enter"))
 	selected, err := model.selection()
 	if err != nil {
 		t.Fatal(err)
@@ -54,23 +54,23 @@ func TestSelectorNavigationWrapsAndPagesAreBounded(t *testing.T) {
 	}
 	model := newSelectorModel(items, SelectOptions{Height: 6})
 
-	model.Update(key("down"))
+	model.Update(keyMsg("down"))
 	if model.cursor != 7 {
 		t.Fatalf("cursor after down = %d, want 7", model.cursor)
 	}
-	model.Update(key("up"))
+	model.Update(keyMsg("up"))
 	if model.cursor != 0 {
 		t.Fatalf("cursor after up = %d, want 0", model.cursor)
 	}
-	model.Update(key("pgup"))
-	model.Update(key("pgup"))
-	model.Update(key("pgup"))
+	model.Update(keyMsg("pgup"))
+	model.Update(keyMsg("pgup"))
+	model.Update(keyMsg("pgup"))
 	if model.cursor != 7 {
 		t.Fatalf("cursor after page up = %d, want 7", model.cursor)
 	}
-	model.Update(key("pgdown"))
-	model.Update(key("pgdown"))
-	model.Update(key("pgdown"))
+	model.Update(keyMsg("pgdown"))
+	model.Update(keyMsg("pgdown"))
+	model.Update(keyMsg("pgdown"))
 	if model.cursor != 0 {
 		t.Fatalf("cursor after page down = %d, want 0", model.cursor)
 	}
@@ -83,7 +83,7 @@ func TestSelectorViewRendersBottomUp(t *testing.T) {
 		{ID: "c", Columns: []string{"C"}},
 	}, SelectOptions{})
 
-	lines := strings.Split(strings.TrimRight(model.View(), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(model.View().Content, "\n"), "\n")
 	if len(lines) != 4 {
 		t.Fatalf("View() produced %d lines, want 4: %q", len(lines), lines)
 	}
@@ -94,8 +94,8 @@ func TestSelectorViewRendersBottomUp(t *testing.T) {
 		t.Fatalf("last line = %q, want the filter input", lines[3])
 	}
 
-	model.Update(key("up"))
-	lines = strings.Split(strings.TrimRight(model.View(), "\n"), "\n")
+	model.Update(keyMsg("up"))
+	lines = strings.Split(strings.TrimRight(model.View().Content, "\n"), "\n")
 	if lines[1] != "> B" || lines[2] != "  A" {
 		t.Fatalf("after up, rows = %q, want marker on B", lines[:3])
 	}
@@ -103,7 +103,7 @@ func TestSelectorViewRendersBottomUp(t *testing.T) {
 
 func TestSelectorCancellationReturnsErrCancelled(t *testing.T) {
 	model := newSelectorModel([]Item{{ID: "one", Columns: []string{"One"}}}, SelectOptions{})
-	model.Update(key("esc"))
+	model.Update(keyMsg("esc"))
 
 	_, err := model.selection()
 	if !errors.Is(err, ErrCancelled) {
@@ -113,7 +113,7 @@ func TestSelectorCancellationReturnsErrCancelled(t *testing.T) {
 
 func TestSelectorEmptyStateView(t *testing.T) {
 	model := newSelectorModel([]Item{{ID: "secret-id", Columns: []string{"Visible label"}}}, SelectOptions{Query: "missing"})
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "No matches.") {
 		t.Fatalf("View() = %q, want empty-state text", view)
 	}
@@ -126,10 +126,10 @@ func TestSelectorResizeChangesWidth(t *testing.T) {
 	model := newSelectorModel([]Item{{ID: "one", Columns: []string{"A very long column value"}}}, SelectOptions{Width: 80})
 	model.Update(tea.WindowSizeMsg{Width: 12, Height: 8})
 
-	if model.width != 12 || model.input.Width != 10 {
-		t.Fatalf("widths = (%d, %d), want (12, 10)", model.width, model.input.Width)
+	if model.width != 12 || model.input.Width() != 10 {
+		t.Fatalf("widths = (%d, %d), want (12, 10)", model.width, model.input.Width())
 	}
-	if strings.Contains(model.View(), "A very long column value") {
+	if strings.Contains(model.View().Content, "A very long column value") {
 		t.Fatal("View() did not truncate a row after resize")
 	}
 }
@@ -155,24 +155,5 @@ func TestSelectionBeforeUIErrorsForEmptyAndNoMatches(t *testing.T) {
 	}
 	if _, _, err := Resolve([]Item{{Columns: []string{"One"}}}, "two"); err == nil || err.Error() != `no items match "two"` {
 		t.Fatalf("no matches error = %v", err)
-	}
-}
-
-func key(value string) tea.KeyMsg {
-	switch value {
-	case "up":
-		return tea.KeyMsg{Type: tea.KeyUp}
-	case "down":
-		return tea.KeyMsg{Type: tea.KeyDown}
-	case "pgup":
-		return tea.KeyMsg{Type: tea.KeyPgUp}
-	case "pgdown":
-		return tea.KeyMsg{Type: tea.KeyPgDown}
-	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
-	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
-	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
 	}
 }
