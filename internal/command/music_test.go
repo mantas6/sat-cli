@@ -130,9 +130,9 @@ func TestMusicPlaySingleMatchSkipsSelectorWithoutTerminal(t *testing.T) {
 		gotID = id
 		return nil
 	}}
-	// Streams are not terminals and Select fails the test if it runs, so
-	// only the non-interactive fast path can succeed here.
-	app, _, _ := newTestApp(t, withAPI(client), withConfig(trackConfig(t, twoTracks...)))
+	// Streams are not terminals, so only the non-interactive fast path can
+	// succeed here.
+	app, _, _ := newTestApp(t, withAPI(client), withConfig(trackConfig(t, twoTracks...)), withRealSelect())
 
 	if err := run(t, app, "music", "play", "second", "track"); err != nil {
 		t.Fatal(err)
@@ -141,15 +141,16 @@ func TestMusicPlaySingleMatchSkipsSelectorWithoutTerminal(t *testing.T) {
 		t.Fatalf("PlayTrack() ID = %q, want two", gotID)
 	}
 
-	if err := run(t, app, "music", "play", "track"); !errors.Is(err, errSelectorNeedsTerminal) {
+	if err := run(t, app, "music", "play", "track"); !errors.Is(err, ui.ErrNeedsTerminal) {
 		t.Fatalf("ambiguous query without terminal error = %v", err)
 	}
 }
 
 func TestMusicPlayNoMatchFails(t *testing.T) {
 	t.Parallel()
-	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks...)))
-	if err := run(t, app, "music", "play", "zzz"); err == nil || err.Error() != `no items match "zzz"` {
+	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks...)), withRealSelect())
+	err := run(t, app, "music", "play", "zzz")
+	if !errors.Is(err, ui.ErrNoMatch) || err.Error() != `no items match "zzz"` {
 		t.Fatalf("Execute() error = %v, want no match", err)
 	}
 }
@@ -225,10 +226,10 @@ func TestMusicSelectorErrorIsWrapped(t *testing.T) {
 
 func TestMusicSelectionRequiresTerminal(t *testing.T) {
 	t.Parallel()
-	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks[0])))
+	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks[0])), withRealSelect())
 
 	err := run(t, app, "music", "play")
-	if err == nil || err.Error() != "interactive selection requires a terminal on stdin and stdout" {
+	if !errors.Is(err, ui.ErrNeedsTerminal) || err.Error() != "interactive selection requires a terminal on stdin and stdout" {
 		t.Fatalf("Execute() error = %v, want terminal requirement", err)
 	}
 }

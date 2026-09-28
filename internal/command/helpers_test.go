@@ -277,6 +277,13 @@ func withTTY() testOption {
 	return func(app *App) { app.IsTTY = func(any) bool { return true } }
 }
 
+// withRealSelect uses ui.Select, which resolves queries without a terminal
+// and fails with ui.ErrNeedsTerminal when the test's buffered streams would
+// need the interactive selector.
+func withRealSelect() testOption {
+	return func(app *App) { app.Select = ui.Select }
+}
+
 // newTestApp returns a hermetic App: a configured fakeConfig, an empty
 // fakeAPI, no environment, buffered streams that are not terminals, and UI,
 // terminal and process boundaries that fail the test when used unexpectedly.

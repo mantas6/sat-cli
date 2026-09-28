@@ -75,7 +75,7 @@ func TestArticleEditSelectedArticleOpensIt(t *testing.T) {
 		},
 	}
 	runner := &fakeRunner{}
-	app, _, _ := newTestApp(t, withAPI(client), withRunner(runner))
+	app, _, _ := newTestApp(t, withAPI(client), withRunner(runner), withRealSelect())
 
 	// "only" narrows the list to one article, so no terminal is needed.
 	if err := run(t, app, "article", "edit", "only"); err != nil {

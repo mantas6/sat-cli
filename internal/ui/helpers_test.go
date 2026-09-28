@@ -24,6 +24,8 @@ func keyMsg(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyEnd}
 	case "enter":
 		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "esc":
 		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	case "space":

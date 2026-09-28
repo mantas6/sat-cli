@@ -53,6 +53,12 @@ func initialSize(s Size, out io.Writer) Size {
 	return s.orDefault()
 }
 
+// isTerminal reports whether stream is an *os.File attached to a terminal.
+func isTerminal(stream any) bool {
+	file, ok := stream.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
 // errInterrupted reports that the program stopped because of SIGINT without
 // ctx being cancelled. Callers map it to their own notion of a clean exit.
 var errInterrupted = errors.New("interrupted")
