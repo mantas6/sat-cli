@@ -10,6 +10,7 @@ import (
 )
 
 func TestStateDirPrecedence(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -44,6 +45,7 @@ func TestStateDirPrecedence(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := StateDir(mapEnv(test.env))
 			if err != nil {
 				t.Fatal(err)
@@ -56,6 +58,7 @@ func TestStateDirPrecedence(t *testing.T) {
 }
 
 func TestStateDirRequiresAbsoluteHome(t *testing.T) {
+	t.Parallel()
 	tests := map[string]map[string]string{
 		"empty home":                    {},
 		"blank home":                    {"HOME": "  "},
@@ -64,6 +67,7 @@ func TestStateDirRequiresAbsoluteHome(t *testing.T) {
 	}
 	for name, env := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			got, err := StateDir(mapEnv(env))
 			if err == nil {
 				t.Fatalf("StateDir() = %q, want error", got)
@@ -76,6 +80,7 @@ func TestStateDirRequiresAbsoluteHome(t *testing.T) {
 }
 
 func TestStoreReadsConfiguration(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "url"), []byte("  https://file.example/prefix  \n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -105,6 +110,7 @@ func TestStoreReadsConfiguration(t *testing.T) {
 }
 
 func TestStoreURLPathPrecedenceOnRead(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "url"), []byte("https://file.example\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -128,6 +134,7 @@ func TestStoreURLPathPrecedenceOnRead(t *testing.T) {
 }
 
 func TestStoreTokenPathPrecedenceOnRead(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "token"), []byte("file-token\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -151,6 +158,7 @@ func TestStoreTokenPathPrecedenceOnRead(t *testing.T) {
 }
 
 func TestStoreWritesThroughPathOverrides(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	urlOverride := filepath.Join(t.TempDir(), "url-override")
 	tokenOverride := filepath.Join(t.TempDir(), "token-override")
@@ -181,6 +189,7 @@ func TestStoreWritesThroughPathOverrides(t *testing.T) {
 }
 
 func TestStoreMissingPathOverride(t *testing.T) {
+	t.Parallel()
 	urlOverride := filepath.Join(t.TempDir(), "missing-url")
 	tokenOverride := filepath.Join(t.TempDir(), "missing-token")
 
@@ -200,6 +209,7 @@ func TestStoreMissingPathOverride(t *testing.T) {
 }
 
 func TestStoreCreatesNestedOverrideDirectory(t *testing.T) {
+	t.Parallel()
 	urlOverride := filepath.Join(t.TempDir(), "nested", "deeper", "url")
 	store := NewStore(t.TempDir(), mapEnv(map[string]string{"SAT_URL_PATH": urlOverride}))
 
@@ -211,6 +221,7 @@ func TestStoreCreatesNestedOverrideDirectory(t *testing.T) {
 }
 
 func TestStoreLeavesExistingOverrideParentPermissions(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o755); err != nil {
 		t.Fatal(err)
@@ -236,6 +247,7 @@ func TestStoreLeavesExistingOverrideParentPermissions(t *testing.T) {
 }
 
 func TestStoreMissingConfiguration(t *testing.T) {
+	t.Parallel()
 	store := NewStore(t.TempDir(), mapEnv(nil))
 
 	if _, err := store.BaseURL(); !errors.Is(err, ErrBaseURLMissing) {
@@ -250,6 +262,7 @@ func TestStoreMissingConfiguration(t *testing.T) {
 }
 
 func TestStoreMissingErrorsNameTheFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))
 	if err := os.WriteFile(filepath.Join(dir, "token"), []byte(" \n"), 0o600); err != nil {
@@ -267,6 +280,7 @@ func TestStoreMissingErrorsNameTheFile(t *testing.T) {
 }
 
 func TestSetTokenRejectsBlankToken(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))
 	for _, value := range []string{"", "   ", "\n\t"} {
@@ -280,6 +294,7 @@ func TestSetTokenRejectsBlankToken(t *testing.T) {
 }
 
 func TestStoreRejectsMalformedBaseURL(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))
 
@@ -301,6 +316,7 @@ func TestStoreRejectsMalformedBaseURL(t *testing.T) {
 }
 
 func TestStoreWritesPrivateAtomicFiles(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "state")
 	store := NewStore(dir, mapEnv(nil))
@@ -322,6 +338,7 @@ func TestStoreWritesPrivateAtomicFiles(t *testing.T) {
 	assertPerm(t, dir, 0o700)
 	assertPerm(t, tmp, 0o700)
 	assertPerm(t, filepath.Join(dir, "token"), 0o600)
+	assertPerm(t, filepath.Join(dir, "url"), 0o600)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -335,6 +352,7 @@ func TestStoreWritesPrivateAtomicFiles(t *testing.T) {
 }
 
 func TestCacheLifecycle(t *testing.T) {
+	t.Parallel()
 	store := NewStore(filepath.Join(t.TempDir(), "state"), mapEnv(nil))
 	if lines, exists, err := store.ReadCacheLines("tracks"); err != nil || exists || lines != nil {
 		t.Fatalf("missing cache = %#v, %v, %v", lines, exists, err)
@@ -364,6 +382,7 @@ func TestCacheLifecycle(t *testing.T) {
 }
 
 func TestWriteCacheLinesRejectsLineBreaks(t *testing.T) {
+	t.Parallel()
 	store := NewStore(t.TempDir(), mapEnv(nil))
 	for _, line := range []string{"a\nb", "a\rb", "trailing\n"} {
 		if err := store.WriteCacheLines("tracks", []string{"ok", line}); err == nil || !strings.Contains(err.Error(), "line 2") {
@@ -376,6 +395,7 @@ func TestWriteCacheLinesRejectsLineBreaks(t *testing.T) {
 }
 
 func TestWriteThroughSymlinkKeepsLink(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	stateDir := filepath.Join(dir, "state")
 	linkTarget := filepath.Join(dir, "dotfiles", "sat-token")
@@ -416,6 +436,7 @@ func TestWriteThroughSymlinkKeepsLink(t *testing.T) {
 }
 
 func TestWriteThroughDanglingSymlinkCreatesTarget(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target-url")
 	urlPath := filepath.Join(dir, "url")
@@ -436,6 +457,7 @@ func TestWriteThroughDanglingSymlinkCreatesTarget(t *testing.T) {
 }
 
 func TestWriteThroughSymlinkLoopFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	loop := filepath.Join(dir, "loop")
 	if err := os.Symlink("loop", loop); err != nil {
@@ -449,6 +471,7 @@ func TestWriteThroughSymlinkLoopFails(t *testing.T) {
 }
 
 func TestTmpDirResecuresExistingDirectory(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "state")
 	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
 		t.Fatal(err)
@@ -465,7 +488,65 @@ func TestTmpDirResecuresExistingDirectory(t *testing.T) {
 	assertPerm(t, tmp, 0o700)
 }
 
+func TestReadEmptyCacheFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store := NewStore(dir, mapEnv(nil))
+	for name, contents := range map[string]string{"empty": "", "newline": "\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		lines, exists, err := store.ReadCacheLines(name)
+		if err != nil || !exists || lines == nil || len(lines) != 0 {
+			t.Fatalf("ReadCacheLines(%s) = %#v, %v, %v; want empty existing cache", name, lines, exists, err)
+		}
+	}
+
+	if err := store.WriteCacheLines("written", nil); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "written")); err != nil || len(data) != 0 {
+		t.Fatalf("WriteCacheLines(nil) wrote %q, %v; want an empty file", data, err)
+	}
+}
+
+func TestURLAndTokenPaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store := NewStore(dir, mapEnv(nil))
+	if store.URLPath() != filepath.Join(dir, "url") || store.TokenPath() != filepath.Join(dir, "token") {
+		t.Fatalf("default paths = %q, %q", store.URLPath(), store.TokenPath())
+	}
+
+	store = NewStore(dir, mapEnv(map[string]string{"SAT_URL_PATH": "  /etc/sat/url \n", "SAT_TOKEN_PATH": "/run/sat/token"}))
+	if store.URLPath() != "/etc/sat/url" || store.TokenPath() != "/run/sat/token" {
+		t.Fatalf("override paths = %q, %q", store.URLPath(), store.TokenPath())
+	}
+
+	store = NewStore(dir, mapEnv(map[string]string{"SAT_URL_PATH": "   ", "SAT_TOKEN_PATH": "\t"}))
+	if store.URLPath() != filepath.Join(dir, "url") || store.TokenPath() != filepath.Join(dir, "token") {
+		t.Fatalf("blank overrides = %q, %q; want defaults", store.URLPath(), store.TokenPath())
+	}
+}
+
+// Not parallel: t.Setenv changes the process environment.
+func TestNilGetenvUsesProcessEnvironment(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "token")
+	t.Setenv("SAT_TOKEN_PATH", override)
+	state := t.TempDir()
+	t.Setenv("SAT_JOURNAL_STATE", state)
+
+	store := NewStore(t.TempDir(), nil)
+	if got := store.TokenPath(); got != override {
+		t.Fatalf("TokenPath() = %q, want %q from the environment", got, override)
+	}
+	if got, err := StateDir(nil); err != nil || got != state {
+		t.Fatalf("StateDir(nil) = %q, %v; want %q", got, err, state)
+	}
+}
+
 func TestCacheNameValidation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))
 	if err := store.SetToken("keep-me"); err != nil {
@@ -473,6 +554,7 @@ func TestCacheNameValidation(t *testing.T) {
 	}
 
 	for _, name := range []string{"", ".", "..", "../outside", "nested/name", "token", "url", "tmp"} {
+		// Sequential: the token check below must run after every subtest.
 		t.Run(name, func(t *testing.T) {
 			if err := store.WriteCacheLines(name, []string{"x"}); err == nil {
 				t.Fatalf("WriteCacheLines(%q) succeeded", name)
@@ -496,65 +578,54 @@ func TestCacheNameValidation(t *testing.T) {
 	}
 }
 
-func TestSetTokenFailedWriteKeepsOriginal(t *testing.T) {
+func TestSetTokenUnwritableDirectoryKeepsOriginal(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores permission bits")
 	}
 
-	parent := t.TempDir()
-	dir := filepath.Join(parent, "state")
-	store := NewStore(dir, mapEnv(nil))
-	if err := store.SetToken("original"); err != nil {
+	// Only the state directory is re-secured by writeAtomic, so a read-only
+	// SAT_TOKEN_PATH parent stays read-only and creating the temporary file
+	// fails.
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenPath, []byte("original\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	// Make the write fail. writeAtomic re-secures the state directory itself
-	// (chmod 0700) via ensureDir, so a read-only state directory alone is not
-	// enough; locking the parent makes the state directory unreachable and
-	// ensureDir fails before any temporary file is created.
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(parent, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		os.Chmod(parent, 0o700)
-		os.Chmod(dir, 0o700)
-	})
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	if err := store.SetToken("new"); err == nil {
-		t.Fatal("SetToken succeeded despite unwritable state directory")
+	store := NewStore(filepath.Join(t.TempDir(), "state"), mapEnv(map[string]string{"SAT_TOKEN_PATH": tokenPath}))
+	if err := store.SetToken("new"); err == nil || !strings.Contains(err.Error(), "create temporary token file") {
+		t.Fatalf("SetToken() = %v, want temporary file creation error", err)
 	}
+	if token, err := store.Token(); err != nil || token != "original" {
+		t.Fatalf("Token() = %q, %v; want original", token, err)
+	}
+	assertOnlyEntries(t, dir, "token")
+}
 
-	// Restore access so the surviving state can be inspected.
-	if err := os.Chmod(parent, 0o700); err != nil {
+func TestSetTokenFailedRenameRemovesTemporaryFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// A non-empty directory where the token file should be makes the final
+	// rename fail after the temporary file was written.
+	tokenPath := filepath.Join(dir, "token")
+	if err := os.MkdirAll(filepath.Join(tokenPath, "keep"), 0o700); err != nil {
 		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "token"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(string(data)); got != "original" {
-		t.Fatalf("token = %q, want original", got)
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
+	store := NewStore(filepath.Join(t.TempDir(), "state"), mapEnv(map[string]string{"SAT_TOKEN_PATH": tokenPath}))
+	if err := store.SetToken("new"); err == nil || !strings.Contains(err.Error(), "replace token file") {
+		t.Fatalf("SetToken() = %v, want rename error", err)
 	}
-	for _, entry := range entries {
-		if entry.Name() != "token" {
-			t.Fatalf("failed write left behind %q", entry.Name())
-		}
-	}
+	assertOnlyEntries(t, dir, "token")
 }
 
 func TestBaseURLUnreadableFile(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores permission bits")
 	}
@@ -576,6 +647,22 @@ func TestBaseURLUnreadableFile(t *testing.T) {
 	}
 	if msg := err.Error(); !strings.Contains(msg, "read") || !strings.Contains(msg, "permission denied") {
 		t.Fatalf("BaseURL error = %v, want read/permission-denied failure", err)
+	}
+}
+
+// assertOnlyEntries fails unless dir contains exactly the named entries.
+func assertOnlyEntries(t *testing.T, dir string, want ...string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, entry := range entries {
+		got = append(got, entry.Name())
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s contains %q, want %q", dir, got, want)
 	}
 }
 

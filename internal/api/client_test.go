@@ -12,118 +12,149 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 )
 
 func TestClientMethods(t *testing.T) {
-	var mu sync.Mutex
-	seen := map[string]bool{}
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer test-token" {
-			t.Errorf("%s authorization = %q", request.URL.Path, request.Header.Get("Authorization"))
+	t.Parallel()
+	type call func(ctx context.Context, client *Client) (any, error)
+	noContent := func(writer http.ResponseWriter) { writer.WriteHeader(http.StatusNoContent) }
+	respondJSON := func(value any) func(http.ResponseWriter) {
+		return func(writer http.ResponseWriter) { writeJSON(t, writer, value) }
+	}
+	control := func(action PlaybackAction) call {
+		return func(ctx context.Context, client *Client) (any, error) {
+			return nil, client.ControlPlayback(ctx, action)
 		}
-		if request.Header.Get("User-Agent") != "sat-cli" {
-			t.Errorf("%s user agent = %q", request.URL.Path, request.Header.Get("User-Agent"))
-		}
-		mu.Lock()
-		seen[request.Method+" "+request.URL.EscapedPath()] = true
-		mu.Unlock()
+	}
+	tests := []struct {
+		name    string
+		request string // method and escaped path
+		query   string
+		accept  string
+		body    map[string]string // expected JSON request body; nil for none
+		respond func(http.ResponseWriter)
+		call    call
+		want    any
+	}{
+		{
+			name: "ListArticles all", request: "GET /api/journals/articles", query: "all=1", accept: "application/json",
+			respond: respondJSON([]Article{{ID: 1, Title: "First", WordCount: 10, CreatedAt: "today"}}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.ListArticles(ctx, true) },
+			want:    []Article{{ID: 1, Title: "First", WordCount: 10, CreatedAt: "today"}},
+		},
+		{
+			name: "ListArticles recent", request: "GET /api/journals/articles", accept: "application/json",
+			respond: respondJSON([]Article{{ID: 2, Journal: &Journal{ID: 3, Title: "Work"}}}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.ListArticles(ctx, false) },
+			want:    []Article{{ID: 2, Journal: &Journal{ID: 3, Title: "Work"}}},
+		},
+		{
+			name: "GetArticle", request: "GET /api/journals/articles/41", accept: "application/json",
+			respond: respondJSON(ArticleContents{Contents: "# text"}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.GetArticle(ctx, 41) },
+			want:    ArticleContents{Contents: "# text"},
+		},
+		{
+			name: "CreateArticle", request: "POST /api/journals/articles", accept: "application/json",
+			body:    map[string]string{"contents": "new text"},
+			respond: respondJSON(Article{ID: 2, WordCount: 2}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.CreateArticle(ctx, "new text") },
+			want:    Article{ID: 2, WordCount: 2},
+		},
+		{
+			name: "UpdateArticleContents", request: "PUT /api/journals/articles/42", accept: "application/json",
+			body:    map[string]string{"contents": "updated"},
+			respond: respondJSON(Article{ID: 42}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.UpdateArticleContents(ctx, 42, "updated") },
+			want:    Article{ID: 42},
+		},
+		{
+			name: "AssignArticleJournal", request: "PUT /api/journals/articles/43", accept: "application/json",
+			body:    map[string]string{"journal": "Work"},
+			respond: respondJSON(Article{ID: 43, Journal: &Journal{Title: "Work"}}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.AssignArticleJournal(ctx, 43, "Work") },
+			want:    Article{ID: 43, Journal: &Journal{Title: "Work"}},
+		},
+		{
+			name: "ListJournals", request: "GET /api/journals", accept: "application/json",
+			respond: respondJSON([]Journal{{ID: 3, Title: "Work"}}),
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.ListJournals(ctx) },
+			want:    []Journal{{ID: 3, Title: "Work"}},
+		},
+		{
+			name: "SavedTracks", request: "GET /api/albums/saved", accept: "application/json",
+			respond: func(writer http.ResponseWriter) {
+				_, _ = io.WriteString(writer, `[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]`)
+			},
+			call: func(ctx context.Context, c *Client) (any, error) { return c.SavedTracks(ctx) },
+			want: []string{"track-id\tartist\t/album\t/01.\ttitle"},
+		},
+		{
+			name: "PlayTrack", request: "PUT /api/albums/play/track%2Fid", accept: textAccept, respond: noContent,
+			call: func(ctx context.Context, c *Client) (any, error) { return nil, c.PlayTrack(ctx, "track/id") },
+		},
+		{name: "ControlPlayback pause", request: "PUT /api/albums/control/pause", accept: textAccept, respond: noContent, call: control(Pause)},
+		{name: "ControlPlayback play", request: "PUT /api/albums/control/play", accept: textAccept, respond: noContent, call: control(Play)},
+		{name: "ControlPlayback next", request: "PUT /api/albums/control/next", accept: textAccept, respond: noContent, call: control(Next)},
+		{name: "ControlPlayback previous", request: "PUT /api/albums/control/previous", accept: textAccept, respond: noContent, call: control(Previous)},
+		{
+			name: "Dashboard", request: "GET /api/dash", accept: textAccept,
+			respond: func(writer http.ResponseWriter) { _, _ = io.WriteString(writer, "dashboard\n") },
+			call:    func(ctx context.Context, c *Client) (any, error) { return c.Dashboard(ctx) },
+			want:    "dashboard\n",
+		},
+	}
 
-		switch request.Method + " " + request.URL.EscapedPath() {
-		case "GET /api/journals/articles":
-			if request.URL.Query().Get("all") != "1" || request.Header.Get("Accept") != "application/json" {
-				t.Errorf("article list query/accept = %q/%q", request.URL.RawQuery, request.Header.Get("Accept"))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				requests.Add(1)
+				if got := request.Method + " " + request.URL.EscapedPath(); got != test.request {
+					t.Errorf("request = %s, want %s", got, test.request)
+				}
+				if request.URL.RawQuery != test.query {
+					t.Errorf("query = %q, want %q", request.URL.RawQuery, test.query)
+				}
+				if got := request.Header.Get("Authorization"); got != "Bearer test-token" {
+					t.Errorf("authorization = %q", got)
+				}
+				if got := request.Header.Get("User-Agent"); got != "sat-cli" {
+					t.Errorf("user agent = %q", got)
+				}
+				if got := request.Header.Get("Accept"); got != test.accept {
+					t.Errorf("accept = %q, want %q", got, test.accept)
+				}
+				if test.body != nil {
+					assertJSONBody(t, request, test.body)
+				} else if got := request.Header.Get("Content-Type"); got != "" {
+					t.Errorf("content type = %q, want none without a body", got)
+				}
+				test.respond(writer)
+			}))
+			t.Cleanup(server.Close)
+
+			got, err := test.call(context.Background(), newTestClient(t, server.URL, "test-token"))
+			if err != nil {
+				t.Fatal(err)
 			}
-			writeJSON(t, writer, []Article{{ID: 1, Title: "First", WordCount: 10, CreatedAt: "today"}})
-		case "GET /api/journals/articles/41":
-			writeJSON(t, writer, ArticleContents{Contents: "# text"})
-		case "POST /api/journals/articles":
-			assertJSONBody(t, request, map[string]string{"contents": "new text"})
-			writeJSON(t, writer, Article{ID: 2, WordCount: 2})
-		case "PUT /api/journals/articles/42":
-			assertJSONBody(t, request, map[string]string{"contents": "updated"})
-			writeJSON(t, writer, Article{ID: 42})
-		case "PUT /api/journals/articles/43":
-			assertJSONBody(t, request, map[string]string{"journal": "Work"})
-			writeJSON(t, writer, Article{ID: 43, Journal: &Journal{Title: "Work"}})
-		case "GET /api/journals":
-			writeJSON(t, writer, []Journal{{ID: 3, Title: "Work"}})
-		case "GET /api/albums/saved":
-			_, _ = io.WriteString(writer, `[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]`)
-		case "PUT /api/albums/play/track%2Fid", "PUT /api/albums/control/next":
-			writer.WriteHeader(http.StatusNoContent)
-		case "GET /api/dash":
-			if got := request.Header.Get("Accept"); got != "application/json, text/plain;q=0.9" {
-				t.Errorf("dashboard accept = %q", got)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("result = %#v, want %#v", got, test.want)
 			}
-			_, _ = io.WriteString(writer, "dashboard\n")
-		default:
-			t.Errorf("unexpected request %s %s", request.Method, request.URL.EscapedPath())
-			http.NotFound(writer, request)
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(t, server.URL, "test-token")
-	articles, err := client.ListArticles(context.Background(), true)
-	if err != nil || len(articles) != 1 || articles[0].Title != "First" {
-		t.Fatalf("ListArticles() = %#v, %v", articles, err)
-	}
-	contents, err := client.GetArticle(context.Background(), 41)
-	if err != nil || contents.Contents != "# text" {
-		t.Fatalf("GetArticle() = %#v, %v", contents, err)
-	}
-	created, err := client.CreateArticle(context.Background(), "new text")
-	if err != nil || created.ID != 2 {
-		t.Fatalf("CreateArticle() = %#v, %v", created, err)
-	}
-	if _, err := client.UpdateArticleContents(context.Background(), 42, "updated"); err != nil {
-		t.Fatal(err)
-	}
-	assigned, err := client.AssignArticleJournal(context.Background(), 43, "Work")
-	if err != nil || assigned.Journal == nil || assigned.Journal.Title != "Work" {
-		t.Fatalf("AssignArticleJournal() = %#v, %v", assigned, err)
-	}
-	journals, err := client.ListJournals(context.Background())
-	if err != nil || len(journals) != 1 || journals[0].ID != 3 {
-		t.Fatalf("ListJournals() = %#v, %v", journals, err)
-	}
-	tracks, err := client.SavedTracks(context.Background())
-	if err != nil || !reflect.DeepEqual(tracks, []string{"track-id\tartist\t/album\t/01.\ttitle"}) {
-		t.Fatalf("SavedTracks() = %#v, %v", tracks, err)
-	}
-	if err := client.PlayTrack(context.Background(), "track/id"); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.ControlPlayback(context.Background(), Next); err != nil {
-		t.Fatal(err)
-	}
-	dashboard, err := client.Dashboard(context.Background())
-	if err != nil || dashboard != "dashboard\n" {
-		t.Fatalf("Dashboard() = %q, %v", dashboard, err)
-	}
-
-	for _, request := range []string{
-		"GET /api/journals/articles",
-		"GET /api/journals/articles/41",
-		"POST /api/journals/articles",
-		"PUT /api/journals/articles/42",
-		"PUT /api/journals/articles/43",
-		"GET /api/journals",
-		"GET /api/albums/saved",
-		"PUT /api/albums/play/track%2Fid",
-		"PUT /api/albums/control/next",
-		"GET /api/dash",
-	} {
-		if !seen[request] {
-			t.Errorf("did not receive %s", request)
-		}
+			if requests.Load() != 1 {
+				t.Fatalf("server received %d requests, want 1", requests.Load())
+			}
+		})
 	}
 }
 
 func TestNotifyEncodesForm(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost || request.URL.Path != "/api/notify" {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
@@ -142,7 +173,7 @@ func TestNotifyEncodesForm(t *testing.T) {
 		}
 		writer.WriteHeader(http.StatusNoContent)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	if err := client.Notify(context.Background(), "a message & more"); err != nil {
@@ -151,6 +182,7 @@ func TestNotifyEncodesForm(t *testing.T) {
 }
 
 func TestWeatherEscapesPlaceAndOmitsAuthentication(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.EscapedPath() != "/api/wt/New%20York%2FUS" {
 			t.Errorf("escaped path = %q", request.URL.EscapedPath())
@@ -160,7 +192,7 @@ func TestWeatherEscapesPlaceAndOmitsAuthentication(t *testing.T) {
 		}
 		_, _ = io.WriteString(writer, "sunny")
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "do-not-send")
 	weather, err := client.Weather(context.Background(), "New York/US")
@@ -170,6 +202,7 @@ func TestWeatherEscapesPlaceAndOmitsAuthentication(t *testing.T) {
 }
 
 func TestWeatherWithoutPlaceOmitsSegmentAndAuthentication(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.EscapedPath() != "/api/wt" {
 			t.Errorf("escaped path = %q", request.URL.EscapedPath())
@@ -179,7 +212,7 @@ func TestWeatherWithoutPlaceOmitsSegmentAndAuthentication(t *testing.T) {
 		}
 		_, _ = io.WriteString(writer, "sunny")
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "do-not-send")
 	weather, err := client.Weather(context.Background(), "")
@@ -189,6 +222,7 @@ func TestWeatherWithoutPlaceOmitsSegmentAndAuthentication(t *testing.T) {
 }
 
 func TestHTTPErrorMappingAndTruncation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		status   int
 		body     string
@@ -203,11 +237,12 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(fmt.Sprint(test.status), func(t *testing.T) {
+			t.Parallel()
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				writer.WriteHeader(test.status)
 				_, _ = io.WriteString(writer, test.body)
 			}))
-			defer server.Close()
+			t.Cleanup(server.Close)
 
 			client := newTestClient(t, server.URL, "token")
 			_, err := client.getText(context.Background(), "/failure", nil)
@@ -237,7 +272,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 		writer.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(writer, secret+strings.Repeat("x", 2000))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client := newTestClient(t, server.URL, secret)
 	_, err := client.getText(context.Background(), "/large", nil)
 	var httpError *HTTPError
@@ -253,6 +288,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 }
 
 func TestTimeoutAndCancellation(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		select {
 		case <-time.After(200 * time.Millisecond):
@@ -260,7 +296,7 @@ func TestTimeoutAndCancellation(t *testing.T) {
 		case <-request.Context().Done():
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client, err := NewClient(server.URL, "", WithTimeout(10*time.Millisecond))
 	if err != nil {
@@ -305,10 +341,10 @@ func TestClientOptionsAreOrderIndependent(t *testing.T) {
 			if client.authHTTP.Timeout != test.want || client.publicHTTP.Timeout != test.want {
 				t.Fatalf("timeouts = %v/%v, want %v", client.authHTTP.Timeout, client.publicHTTP.Timeout, test.want)
 			}
+			if base.Timeout != time.Minute || base.CheckRedirect != nil {
+				t.Fatalf("WithHTTPClient mutated the caller's client: %#v", base)
+			}
 		})
-	}
-	if base.Timeout != time.Minute || base.CheckRedirect != nil {
-		t.Fatalf("WithHTTPClient mutated the caller's client: %#v", base)
 	}
 }
 
@@ -365,26 +401,11 @@ func TestTextResponsesAreBounded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = io.Copy(writer, io.LimitReader(neverEnding('x'), maxTextBody+10))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	if got, err := client.Dashboard(context.Background()); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("Dashboard() = %d bytes, %v; want size error", len(got), err)
-	}
-}
-
-func TestJSONContentTypeOnlyWithBody(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if got := request.Header.Get("Content-Type"); got != "" {
-			t.Errorf("%s content type = %q, want none without a body", request.Method, got)
-		}
-		writeJSON(t, writer, []Journal{})
-	}))
-	defer server.Close()
-
-	if _, err := newTestClient(t, server.URL, "token").ListJournals(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -401,11 +422,19 @@ func (b neverEnding) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func TestSpotifyErrorError(t *testing.T) {
+	t.Parallel()
+	if got := (&SpotifyError{Message: "No active device"}).Error(); got != "No active device" {
+		t.Fatalf("Error() = %q", got)
+	}
+}
+
 func TestSpotifyErrorOnSuccessfulResponse(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(writer, "  Spotify device is unavailable  \n")
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	err := client.PlayTrack(context.Background(), "1")
@@ -416,14 +445,15 @@ func TestSpotifyErrorOnSuccessfulResponse(t *testing.T) {
 }
 
 func TestAuthenticatedRequestsDoNotFollowRedirects(t *testing.T) {
-	var targetCalls int
+	t.Parallel()
+	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		targetCalls++
+		targetCalls.Add(1)
 		_, _ = io.WriteString(writer, "followed")
 	}))
-	defer target.Close()
+	t.Cleanup(target.Close)
 
-	var endCalls int
+	var endCalls atomic.Int32
 	source := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/same-start":
@@ -433,11 +463,11 @@ func TestAuthenticatedRequestsDoNotFollowRedirects(t *testing.T) {
 		case "/post-start":
 			http.Redirect(writer, request, "/same-end", http.StatusFound)
 		case "/same-end":
-			endCalls++
+			endCalls.Add(1)
 			_, _ = io.WriteString(writer, "followed")
 		}
 	}))
-	defer source.Close()
+	t.Cleanup(source.Close)
 
 	client := newTestClient(t, source.URL, "redirect-token")
 	for name, call := range map[string]func() error{
@@ -465,12 +495,58 @@ func TestAuthenticatedRequestsDoNotFollowRedirects(t *testing.T) {
 			}
 		})
 	}
-	if targetCalls != 0 || endCalls != 0 {
-		t.Fatalf("redirect followed: target=%d same-host=%d", targetCalls, endCalls)
+	if targetCalls.Load() != 0 || endCalls.Load() != 0 {
+		t.Fatalf("redirect followed: target=%d same-host=%d", targetCalls.Load(), endCalls.Load())
+	}
+}
+
+func TestAuthenticatedRequestsDoNotFollowHTTPSToHTTPDowngrade(t *testing.T) {
+	t.Parallel()
+	var leaked atomic.Value
+	plain := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		leaked.Store(request.Header.Get("Authorization"))
+		_, _ = io.WriteString(writer, "downgraded")
+	}))
+	t.Cleanup(plain.Close)
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, plain.URL+request.URL.Path, http.StatusMovedPermanently)
+	}))
+	t.Cleanup(secure.Close)
+
+	client, err := NewClient(secure.URL, "downgrade-token", WithHTTPClient(secure.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Dashboard(context.Background())
+	var httpError *HTTPError
+	if !errors.As(err, &httpError) || httpError.StatusCode != http.StatusMovedPermanently {
+		t.Fatalf("Dashboard() error = %T %v, want HTTP 301 HTTPError", err, err)
+	}
+	if value := leaked.Load(); value != nil {
+		t.Fatalf("plain-HTTP server was reached with authorization %q", value)
+	}
+}
+
+func TestUnauthenticatedRedirectLimit(t *testing.T) {
+	t.Parallel()
+	var hops atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		hops.Add(1)
+		http.Redirect(writer, request, fmt.Sprintf("/api/wt/hop%d", hops.Load()), http.StatusFound)
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := newTestClient(t, server.URL, "token").Weather(context.Background(), "loop")
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") || !strings.HasPrefix(err.Error(), "GET /api/wt/loop: ") {
+		t.Fatalf("Weather() error = %v, want redirect limit error naming the request", err)
+	}
+	if got := hops.Load(); got != 10 {
+		t.Fatalf("server saw %d requests, want 10", got)
 	}
 }
 
 func TestUnauthenticatedRequestsFollowRedirects(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/wt/Vilnius":
@@ -479,7 +555,7 @@ func TestUnauthenticatedRequestsFollowRedirects(t *testing.T) {
 			_, _ = io.WriteString(writer, "sunny")
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	weather, err := client.Weather(context.Background(), "Vilnius")
@@ -488,7 +564,83 @@ func TestUnauthenticatedRequestsFollowRedirects(t *testing.T) {
 	}
 }
 
+func TestMalformedJSONResponse(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, `[{"id":`)
+	}))
+	t.Cleanup(server.Close)
+
+	articles, err := newTestClient(t, server.URL, "token").ListArticles(context.Background(), false)
+	if err == nil || !strings.HasPrefix(err.Error(), "GET /api/journals/articles: decode response: ") {
+		t.Fatalf("ListArticles() = %#v, %v; want decode error naming the request", articles, err)
+	}
+}
+
+func TestJSONWithoutOutputDiscardsBody(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		assertJSONBody(t, request, map[string]string{"a": "b"})
+		// Not valid JSON: with out == nil the body must not be decoded.
+		_, _ = io.WriteString(writer, "{ignored")
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL, "token")
+	if err := client.sendJSON(context.Background(), http.MethodPut, "/thing", map[string]string{"a": "b"}, nil); err != nil {
+		t.Fatalf("sendJSON(out = nil) = %v", err)
+	}
+}
+
+func TestCreateArticleValidationError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(writer, `{"message":"The contents field is required.","errors":{"contents":["The contents field is required."]}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	article, err := newTestClient(t, server.URL, "token").CreateArticle(context.Background(), "")
+	var httpError *HTTPError
+	if !errors.As(err, &httpError) {
+		t.Fatalf("CreateArticle() = %#v, %T %v; want *HTTPError", article, err, err)
+	}
+	if httpError.StatusCode != http.StatusUnprocessableEntity || httpError.Method != http.MethodPost ||
+		httpError.Path != "/api/journals/articles" || httpError.Message != "The contents field is required." {
+		t.Fatalf("HTTPError = %#v", httpError)
+	}
+	if want := "POST /api/journals/articles: HTTP 422 Unprocessable Entity: The contents field is required."; err.Error() != want {
+		t.Fatalf("Error() = %q, want %q", err, want)
+	}
+	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrForbidden) {
+		t.Fatalf("422 matched a credential sentinel: %v", err)
+	}
+}
+
+func TestHTTPErrorMessage(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		`{"message":"  padded  "}`: "padded",
+		`{"message":""}`:           "",
+		`{"error":"other"}`:        "",
+		`["message"]`:              "",
+		"plain text":               "",
+		"":                         "",
+	}
+	for body, want := range tests {
+		if got := jsonMessage(body); got != want {
+			t.Errorf("jsonMessage(%q) = %q, want %q", body, got, want)
+		}
+	}
+	plain := &HTTPError{StatusCode: http.StatusBadGateway, Method: http.MethodGet, Path: "/x", Body: "upstream down"}
+	if got, want := plain.Error(), "GET /x: HTTP 502 Bad Gateway: upstream down"; got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
 func TestJSONEmptySuccessResponses(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/no-content":
@@ -499,11 +651,12 @@ func TestJSONEmptySuccessResponses(t *testing.T) {
 			_, _ = io.WriteString(writer, `{"result":"ok"}`+"\n\n")
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	for _, path := range []string{"/no-content", "/empty", "/trailing"} {
 		t.Run(path, func(t *testing.T) {
+			t.Parallel()
 			var output struct {
 				Result string `json:"result"`
 			}
@@ -518,6 +671,7 @@ func TestJSONEmptySuccessResponses(t *testing.T) {
 }
 
 func TestHTTPErrorRedactsTokenStraddlingTruncation(t *testing.T) {
+	t.Parallel()
 	secret := "straddling-secret-token"
 	tests := map[string]string{
 		// The token starts just before the limit and ends past it.
@@ -530,11 +684,12 @@ func TestHTTPErrorRedactsTokenStraddlingTruncation(t *testing.T) {
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				writer.WriteHeader(http.StatusInternalServerError)
 				_, _ = io.WriteString(writer, body)
 			}))
-			defer server.Close()
+			t.Cleanup(server.Close)
 
 			client := newTestClient(t, server.URL, secret)
 			_, err := client.getText(context.Background(), "/large", nil)
@@ -558,13 +713,14 @@ func TestHTTPErrorRedactsTokenStraddlingTruncation(t *testing.T) {
 }
 
 func TestBaseURLPathPrefixAndJoinPath(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/sat/prefix/api/dash" {
 			t.Errorf("path = %q", request.URL.Path)
 		}
 		_, _ = io.WriteString(writer, "ok")
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL+"/sat/prefix/", "token")
 	if _, err := client.Dashboard(context.Background()); err != nil {
@@ -581,11 +737,12 @@ func TestBaseURLPathPrefixAndJoinPath(t *testing.T) {
 }
 
 func TestInvalidIDsAndActionsNeverReachTheServer(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		t.Errorf("unexpected request %s %s", request.Method, request.URL.EscapedPath())
 		writer.WriteHeader(http.StatusTeapot)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	ctx := context.Background()
@@ -608,6 +765,7 @@ func TestInvalidIDsAndActionsNeverReachTheServer(t *testing.T) {
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if err := call(); err == nil {
 				t.Fatal("call succeeded, want validation error")
 			}
@@ -616,13 +774,14 @@ func TestInvalidIDsAndActionsNeverReachTheServer(t *testing.T) {
 }
 
 func TestGenericHelpersIncludeQueryAndDecodeJSON(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Query().Get("q") != "a & b" {
 			t.Errorf("query = %q", request.URL.RawQuery)
 		}
 		writeJSON(t, writer, map[string]string{"result": "ok"})
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, "token")
 	var output struct {
