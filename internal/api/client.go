@@ -116,18 +116,18 @@ func NewClient(baseURL, token string, options ...Option) (*Client, error) {
 	}, nil
 }
 
-// GetJSON performs an authenticated GET request and decodes its JSON response.
-func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out any) error {
+// getJSON performs an authenticated GET request and decodes its JSON response.
+func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out any) error {
 	return c.doJSON(ctx, http.MethodGet, path, query, nil, out, true)
 }
 
-// SendJSON performs an authenticated JSON request and decodes its JSON response.
-func (c *Client) SendJSON(ctx context.Context, method, path string, body, out any) error {
+// sendJSON performs an authenticated JSON request and decodes its JSON response.
+func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {
 	return c.doJSON(ctx, method, path, nil, body, out, true)
 }
 
-// PostForm performs an authenticated form request and returns its response body.
-func (c *Client) PostForm(ctx context.Context, path string, form url.Values) ([]byte, error) {
+// postForm performs an authenticated form request and returns its response body.
+func (c *Client) postForm(ctx context.Context, path string, form url.Values) ([]byte, error) {
 	request, err := c.newRequest(ctx, http.MethodPost, path, nil, strings.NewReader(form.Encode()), true)
 	if err != nil {
 		return nil, err
@@ -138,13 +138,13 @@ func (c *Client) PostForm(ctx context.Context, path string, form url.Values) ([]
 	return c.doBytes(request, true)
 }
 
-// GetText performs an authenticated GET request and returns its response body.
-func (c *Client) GetText(ctx context.Context, path string, query url.Values) ([]byte, error) {
+// getText performs an authenticated GET request and returns its response body.
+func (c *Client) getText(ctx context.Context, path string, query url.Values) ([]byte, error) {
 	return c.doText(ctx, http.MethodGet, path, query, true)
 }
 
-// GetTextUnauthenticated performs a public GET request without a bearer header.
-func (c *Client) GetTextUnauthenticated(ctx context.Context, path string, query url.Values) ([]byte, error) {
+// getPublicText performs a public GET request without a bearer header.
+func (c *Client) getPublicText(ctx context.Context, path string, query url.Values) ([]byte, error) {
 	return c.doText(ctx, http.MethodGet, path, query, false)
 }
 

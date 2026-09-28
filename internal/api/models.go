@@ -28,7 +28,7 @@ type articleJournalRequest struct {
 	Journal string `json:"journal"`
 }
 
-// SavedTrack is a single saved-track line from the saved albums endpoint.
-type SavedTrack struct {
+// savedTrack is a single saved-track line from the saved albums endpoint.
+type savedTrack struct {
 	Line string `json:"line"`
 }

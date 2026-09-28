@@ -210,7 +210,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 			defer server.Close()
 
 			client := newTestClient(t, server.URL, "token")
-			_, err := client.GetText(context.Background(), "/failure", nil)
+			_, err := client.getText(context.Background(), "/failure", nil)
 			var httpError *HTTPError
 			if !errors.As(err, &httpError) {
 				t.Fatalf("error type = %T (%v)", err, err)
@@ -239,7 +239,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 	}))
 	defer server.Close()
 	client := newTestClient(t, server.URL, secret)
-	_, err := client.GetText(context.Background(), "/large", nil)
+	_, err := client.getText(context.Background(), "/large", nil)
 	var httpError *HTTPError
 	if !errors.As(err, &httpError) {
 		t.Fatalf("error type = %T", err)
@@ -266,14 +266,14 @@ func TestTimeoutAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.GetText(context.Background(), "/slow", nil); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := client.getText(context.Background(), "/slow", nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout error = %T %v", err, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	client = newTestClient(t, server.URL, "")
-	if _, err := client.GetText(ctx, "/canceled", nil); !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "GET /canceled: ") {
+	if _, err := client.getText(ctx, "/canceled", nil); !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "GET /canceled: ") {
 		t.Fatalf("cancellation error = %T %v, want context.Canceled prefixed with the request", err, err)
 	}
 }
@@ -442,19 +442,19 @@ func TestAuthenticatedRequestsDoNotFollowRedirects(t *testing.T) {
 	client := newTestClient(t, source.URL, "redirect-token")
 	for name, call := range map[string]func() error{
 		"same host": func() error {
-			_, err := client.GetText(context.Background(), "/same-start", nil)
+			_, err := client.getText(context.Background(), "/same-start", nil)
 			return err
 		},
 		"cross host": func() error {
-			_, err := client.GetText(context.Background(), "/cross-start", nil)
+			_, err := client.getText(context.Background(), "/cross-start", nil)
 			return err
 		},
 		"post": func() error {
-			_, err := client.PostForm(context.Background(), "/post-start", url.Values{"a": {"b"}})
+			_, err := client.postForm(context.Background(), "/post-start", url.Values{"a": {"b"}})
 			return err
 		},
 		"json": func() error {
-			return client.SendJSON(context.Background(), http.MethodPut, "/same-start", map[string]string{"a": "b"}, nil)
+			return client.sendJSON(context.Background(), http.MethodPut, "/same-start", map[string]string{"a": "b"}, nil)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -507,8 +507,8 @@ func TestJSONEmptySuccessResponses(t *testing.T) {
 			var output struct {
 				Result string `json:"result"`
 			}
-			if err := client.GetJSON(context.Background(), path, nil, &output); err != nil {
-				t.Fatalf("GetJSON(%s) = %v", path, err)
+			if err := client.getJSON(context.Background(), path, nil, &output); err != nil {
+				t.Fatalf("getJSON(%s) = %v", path, err)
 			}
 			if path == "/trailing" && output.Result != "ok" {
 				t.Fatalf("decoded output = %#v", output)
@@ -537,7 +537,7 @@ func TestHTTPErrorRedactsTokenStraddlingTruncation(t *testing.T) {
 			defer server.Close()
 
 			client := newTestClient(t, server.URL, secret)
-			_, err := client.GetText(context.Background(), "/large", nil)
+			_, err := client.getText(context.Background(), "/large", nil)
 			var httpError *HTTPError
 			if !errors.As(err, &httpError) {
 				t.Fatalf("error type = %T", err)
@@ -570,12 +570,12 @@ func TestBaseURLPathPrefixAndJoinPath(t *testing.T) {
 	if _, err := client.Dashboard(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := JoinPath("api", "resource", "an/id", "New York"); err != nil || got != "/api/resource/an%2Fid/New%20York" {
-		t.Fatalf("JoinPath() = %q, %v", got, err)
+	if got, err := joinPath("api", "resource", "an/id", "New York"); err != nil || got != "/api/resource/an%2Fid/New%20York" {
+		t.Fatalf("joinPath() = %q, %v", got, err)
 	}
 	for _, segment := range []string{"", ".", ".."} {
-		if got, err := JoinPath("api", segment); err == nil {
-			t.Fatalf("JoinPath(%q) = %q, want error", segment, got)
+		if got, err := joinPath("api", segment); err == nil {
+			t.Fatalf("joinPath(%q) = %q, want error", segment, got)
 		}
 	}
 }
@@ -628,7 +628,7 @@ func TestGenericHelpersIncludeQueryAndDecodeJSON(t *testing.T) {
 	var output struct {
 		Result string `json:"result"`
 	}
-	if err := client.GetJSON(context.Background(), "/search", url.Values{"q": {"a & b"}}, &output); err != nil {
+	if err := client.getJSON(context.Background(), "/search", url.Values{"q": {"a & b"}}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if output.Result != "ok" {

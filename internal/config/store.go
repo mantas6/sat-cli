@@ -38,11 +38,6 @@ func NewStore(stateDir string, getenv func(string) string) *Store {
 	return &Store{dir: stateDir, getenv: getenv}
 }
 
-// SplitTabs splits one legacy cache line into its tab-delimited fields.
-func SplitTabs(line string) []string {
-	return strings.Split(line, "\t")
-}
-
 // Dir returns the Store's state directory.
 func (s *Store) Dir() string {
 	return s.dir

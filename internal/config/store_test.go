@@ -334,7 +334,7 @@ func TestStoreWritesPrivateAtomicFiles(t *testing.T) {
 	}
 }
 
-func TestCacheLifecycleAndSplitTabs(t *testing.T) {
+func TestCacheLifecycle(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "state"), mapEnv(nil))
 	if lines, exists, err := store.ReadCacheLines("tracks"); err != nil || exists || lines != nil {
 		t.Fatalf("missing cache = %#v, %v, %v", lines, exists, err)
@@ -347,9 +347,6 @@ func TestCacheLifecycleAndSplitTabs(t *testing.T) {
 	got, exists, err := store.ReadCacheLines("tracks")
 	if err != nil || !exists || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ReadCacheLines() = %#v, %v, %v", got, exists, err)
-	}
-	if fields := SplitTabs(want[0]); len(fields) != 5 || fields[1] != "artist" {
-		t.Fatalf("SplitTabs() = %#v", fields)
 	}
 
 	if err := store.RemoveCache("tracks"); err != nil {

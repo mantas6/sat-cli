@@ -24,7 +24,7 @@ func articlePath(id int) (string, error) {
 	if id <= 0 {
 		return "", fmt.Errorf("invalid article ID %d", id)
 	}
-	return JoinPath("api", "journals", "articles", strconv.Itoa(id))
+	return joinPath("api", "journals", "articles", strconv.Itoa(id))
 }
 
 // ListArticles returns recent articles, or all articles when all is true.
@@ -35,7 +35,7 @@ func (c *Client) ListArticles(ctx context.Context, all bool) ([]Article, error) 
 	}
 
 	var articles []Article
-	err := c.GetJSON(ctx, "/api/journals/articles", query, &articles)
+	err := c.getJSON(ctx, "/api/journals/articles", query, &articles)
 	return articles, err
 }
 
@@ -46,14 +46,14 @@ func (c *Client) GetArticle(ctx context.Context, id int) (ArticleContents, error
 		return ArticleContents{}, err
 	}
 	var contents ArticleContents
-	err = c.GetJSON(ctx, path, nil, &contents)
+	err = c.getJSON(ctx, path, nil, &contents)
 	return contents, err
 }
 
 // CreateArticle creates an article from Markdown contents.
 func (c *Client) CreateArticle(ctx context.Context, contents string) (Article, error) {
 	var article Article
-	err := c.SendJSON(ctx, http.MethodPost, "/api/journals/articles", articleContentsRequest{Contents: contents}, &article)
+	err := c.sendJSON(ctx, http.MethodPost, "/api/journals/articles", articleContentsRequest{Contents: contents}, &article)
 	return article, err
 }
 
@@ -64,7 +64,7 @@ func (c *Client) UpdateArticleContents(ctx context.Context, id int, contents str
 		return Article{}, err
 	}
 	var article Article
-	err = c.SendJSON(ctx, http.MethodPut, path, articleContentsRequest{Contents: contents}, &article)
+	err = c.sendJSON(ctx, http.MethodPut, path, articleContentsRequest{Contents: contents}, &article)
 	return article, err
 }
 
@@ -75,21 +75,21 @@ func (c *Client) AssignArticleJournal(ctx context.Context, id int, journalTitle 
 		return Article{}, err
 	}
 	var article Article
-	err = c.SendJSON(ctx, http.MethodPut, path, articleJournalRequest{Journal: journalTitle}, &article)
+	err = c.sendJSON(ctx, http.MethodPut, path, articleJournalRequest{Journal: journalTitle}, &article)
 	return article, err
 }
 
 // ListJournals returns all journals.
 func (c *Client) ListJournals(ctx context.Context) ([]Journal, error) {
 	var journals []Journal
-	err := c.GetJSON(ctx, "/api/journals", nil, &journals)
+	err := c.getJSON(ctx, "/api/journals", nil, &journals)
 	return journals, err
 }
 
 // SavedTracks returns the legacy tab-delimited saved-track lines.
 func (c *Client) SavedTracks(ctx context.Context) ([]string, error) {
-	var tracks []SavedTrack
-	if err := c.GetJSON(ctx, "/api/albums/saved", nil, &tracks); err != nil {
+	var tracks []savedTrack
+	if err := c.getJSON(ctx, "/api/albums/saved", nil, &tracks); err != nil {
 		return nil, err
 	}
 
@@ -103,7 +103,7 @@ func (c *Client) SavedTracks(ctx context.Context) ([]string, error) {
 
 // PlayTrack starts playback for a Spotify track or album ID.
 func (c *Client) PlayTrack(ctx context.Context, id string) error {
-	path, err := JoinPath("api", "albums", "play", id)
+	path, err := joinPath("api", "albums", "play", id)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (c *Client) ControlPlayback(ctx context.Context, action PlaybackAction) err
 	default:
 		return fmt.Errorf("invalid playback action %q", action)
 	}
-	path, err := JoinPath("api", "albums", "control", string(action))
+	path, err := joinPath("api", "albums", "control", string(action))
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func (c *Client) spotifyRequest(ctx context.Context, path string) error {
 
 // Dashboard returns the plain-text dashboard.
 func (c *Client) Dashboard(ctx context.Context) (string, error) {
-	data, err := c.GetText(ctx, "/api/dash", nil)
+	data, err := c.getText(ctx, "/api/dash", nil)
 	return string(data), err
 }
 
@@ -149,17 +149,17 @@ func (c *Client) Weather(ctx context.Context, place string) (string, error) {
 	if place != "" {
 		segments = append(segments, place)
 	}
-	path, err := JoinPath(segments...)
+	path, err := joinPath(segments...)
 	if err != nil {
 		return "", err
 	}
-	data, err := c.GetTextUnauthenticated(ctx, path, nil)
+	data, err := c.getPublicText(ctx, path, nil)
 	return string(data), err
 }
 
 // Notify posts a notification message.
 func (c *Client) Notify(ctx context.Context, message string) error {
-	_, err := c.PostForm(ctx, "/api/notify", url.Values{
+	_, err := c.postForm(ctx, "/api/notify", url.Values{
 		"message": {message},
 	})
 	return err

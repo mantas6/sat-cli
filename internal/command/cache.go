@@ -3,7 +3,6 @@ package command
 import (
 	"strings"
 
-	"github.com/mantas6/sat-cli/internal/config"
 	"github.com/mantas6/sat-cli/internal/ui"
 )
 
@@ -26,6 +25,11 @@ func cacheLine(item ui.Item) string {
 	return strings.Join(append([]string{item.ID}, item.Columns...), "\t")
 }
 
+// splitTabs splits one cache record into its tab-delimited fields.
+func splitTabs(line string) []string {
+	return strings.Split(line, "\t")
+}
+
 // parseCacheLines turns cache records into picker items. The first field is
 // the item ID and the rest are its columns; blank lines and records without
 // an ID are skipped.
@@ -35,7 +39,7 @@ func parseCacheLines(lines []string) []ui.Item {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		fields := config.SplitTabs(line)
+		fields := splitTabs(line)
 		if fields[0] == "" {
 			continue
 		}
