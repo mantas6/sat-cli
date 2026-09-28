@@ -38,7 +38,7 @@ func TestArticleEditOffersNewFirstAndFetchesRecentArticles(t *testing.T) {
 	if err := executeArticleTestCommand(app, "article", "edit", "Shared", "article"); err != nil {
 		t.Fatal(err)
 	}
-	if len(gotItems) != 3 || gotItems[0].ID != "0" || gotItems[0].Columns[0] != "New" || gotItems[1].ID != "2" {
+	if len(gotItems) != 3 || gotItems[0].ID != newArticleItemID || gotItems[0].Columns[0] != "New" || gotItems[1].ID != "2" {
 		t.Fatalf("selector items = %#v, want New then reversed articles", gotItems)
 	}
 	if gotQuery != "Shared article" {
@@ -57,9 +57,9 @@ func TestArticleEditWithIDDownloadsFilesAndBuildsEditorInvocation(t *testing.T) 
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, list: func(context.Context, bool) ([]api.Article, error) {
 		t.Fatal("ListArticles() called with --id")
 		return nil, nil
-	}, get: func(_ context.Context, id string) (api.ArticleContents, error) {
-		if id != "27" {
-			t.Fatalf("GetArticle() ID = %q", id)
+	}, get: func(_ context.Context, id int) (api.ArticleContents, error) {
+		if id != 27 {
+			t.Fatalf("GetArticle() ID = %d", id)
 		}
 		return api.ArticleContents{Contents: "# Existing\n"}, nil
 	}}
@@ -103,10 +103,11 @@ func TestArticleNewSavedAssignsJournal(t *testing.T) {
 		return items[0], nil
 	}
 
-	var gotID, gotJournal string
+	var gotID int
+	var gotJournal string
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, journals: func(context.Context) ([]api.Journal, error) {
 		return []api.Journal{{ID: 1, Title: "Daily"}}, nil
-	}, assign: func(_ context.Context, id, journal string) (api.Article, error) {
+	}, assign: func(_ context.Context, id int, journal string) (api.Article, error) {
 		gotID, gotJournal = id, journal
 		return api.Article{}, nil
 	}}
@@ -123,13 +124,13 @@ func TestArticleNewSavedAssignsJournal(t *testing.T) {
 	if err := executeArticleTestCommand(app, "article", "new"); err != nil {
 		t.Fatal(err)
 	}
-	if gotID != "81" || gotJournal != "Daily" {
-		t.Fatalf("AssignArticleJournal() = (%q, %q), want (81, Daily)", gotID, gotJournal)
+	if gotID != 81 || gotJournal != "Daily" {
+		t.Fatalf("AssignArticleJournal() = (%d, %q), want (81, Daily)", gotID, gotJournal)
 	}
 }
 
 func TestArticleNewWithoutSaveDoesNotAssign(t *testing.T) {
-	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, assign: func(context.Context, string, string) (api.Article, error) {
+	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, assign: func(context.Context, int, string) (api.Article, error) {
 		t.Fatal("AssignArticleJournal() called without a save")
 		return api.Article{}, nil
 	}}

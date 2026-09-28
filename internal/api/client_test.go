@@ -37,7 +37,7 @@ func TestClientMethods(t *testing.T) {
 				t.Errorf("article list query/accept = %q/%q", request.URL.RawQuery, request.Header.Get("Accept"))
 			}
 			writeJSON(t, writer, []Article{{ID: 1, Title: "First", WordCount: 10, CreatedAt: "today"}})
-		case "GET /api/journals/articles/id%2Fwith%20space":
+		case "GET /api/journals/articles/41":
 			writeJSON(t, writer, ArticleContents{Contents: "# text"})
 		case "POST /api/journals/articles":
 			assertJSONBody(t, request, map[string]string{"contents": "new text"})
@@ -71,7 +71,7 @@ func TestClientMethods(t *testing.T) {
 	if err != nil || len(articles) != 1 || articles[0].Title != "First" {
 		t.Fatalf("ListArticles() = %#v, %v", articles, err)
 	}
-	contents, err := client.GetArticle(context.Background(), "id/with space")
+	contents, err := client.GetArticle(context.Background(), 41)
 	if err != nil || contents.Contents != "# text" {
 		t.Fatalf("GetArticle() = %#v, %v", contents, err)
 	}
@@ -79,10 +79,10 @@ func TestClientMethods(t *testing.T) {
 	if err != nil || created.ID != 2 {
 		t.Fatalf("CreateArticle() = %#v, %v", created, err)
 	}
-	if _, err := client.UpdateArticleContents(context.Background(), "42", "updated"); err != nil {
+	if _, err := client.UpdateArticleContents(context.Background(), 42, "updated"); err != nil {
 		t.Fatal(err)
 	}
-	assigned, err := client.AssignArticleJournal(context.Background(), "43", "Work")
+	assigned, err := client.AssignArticleJournal(context.Background(), 43, "Work")
 	if err != nil || assigned.Journal == nil || assigned.Journal.Title != "Work" {
 		t.Fatalf("AssignArticleJournal() = %#v, %v", assigned, err)
 	}
@@ -97,7 +97,7 @@ func TestClientMethods(t *testing.T) {
 	if err := client.PlayTrack(context.Background(), "track/id"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.ControlPlayback(context.Background(), "next"); err != nil {
+	if err := client.ControlPlayback(context.Background(), Next); err != nil {
 		t.Fatal(err)
 	}
 	dashboard, err := client.Dashboard(context.Background())
@@ -107,7 +107,7 @@ func TestClientMethods(t *testing.T) {
 
 	for _, request := range []string{
 		"GET /api/journals/articles",
-		"GET /api/journals/articles/id%2Fwith%20space",
+		"GET /api/journals/articles/41",
 		"POST /api/journals/articles",
 		"PUT /api/journals/articles/42",
 		"PUT /api/journals/articles/43",
@@ -438,8 +438,48 @@ func TestBaseURLPathPrefixAndJoinPath(t *testing.T) {
 	if _, err := client.Dashboard(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := JoinPath("api", "resource", "an/id", "New York"); got != "/api/resource/an%2Fid/New%20York" {
-		t.Fatalf("JoinPath() = %q", got)
+	if got, err := JoinPath("api", "resource", "an/id", "New York"); err != nil || got != "/api/resource/an%2Fid/New%20York" {
+		t.Fatalf("JoinPath() = %q, %v", got, err)
+	}
+	for _, segment := range []string{"", ".", ".."} {
+		if got, err := JoinPath("api", segment); err == nil {
+			t.Fatalf("JoinPath(%q) = %q, want error", segment, got)
+		}
+	}
+}
+
+func TestInvalidIDsAndActionsNeverReachTheServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		t.Errorf("unexpected request %s %s", request.Method, request.URL.EscapedPath())
+		writer.WriteHeader(http.StatusTeapot)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "token")
+	ctx := context.Background()
+	calls := map[string]func() error{
+		"GetArticle zero":     func() error { _, err := client.GetArticle(ctx, 0); return err },
+		"GetArticle negative": func() error { _, err := client.GetArticle(ctx, -1); return err },
+		"UpdateArticleContents zero": func() error {
+			_, err := client.UpdateArticleContents(ctx, 0, "x")
+			return err
+		},
+		"AssignArticleJournal zero": func() error {
+			_, err := client.AssignArticleJournal(ctx, 0, "Work")
+			return err
+		},
+		"PlayTrack empty":       func() error { return client.PlayTrack(ctx, "") },
+		"PlayTrack dot":         func() error { return client.PlayTrack(ctx, ".") },
+		"PlayTrack dot dot":     func() error { return client.PlayTrack(ctx, "..") },
+		"ControlPlayback bogus": func() error { return client.ControlPlayback(ctx, PlaybackAction("..")) },
+		"Weather dot dot":       func() error { _, err := client.Weather(ctx, ".."); return err },
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			if err := call(); err == nil {
+				t.Fatal("call succeeded, want validation error")
+			}
+		})
 	}
 }
 

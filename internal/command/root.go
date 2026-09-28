@@ -36,14 +36,14 @@ type ConfigStore interface {
 // APIClient contains the Satellite operations used by CLI commands.
 type APIClient interface {
 	ListArticles(context.Context, bool) ([]api.Article, error)
-	GetArticle(context.Context, string) (api.ArticleContents, error)
+	GetArticle(context.Context, int) (api.ArticleContents, error)
 	CreateArticle(context.Context, string) (api.Article, error)
-	UpdateArticleContents(context.Context, string, string) (api.Article, error)
-	AssignArticleJournal(context.Context, string, string) (api.Article, error)
+	UpdateArticleContents(context.Context, int, string) (api.Article, error)
+	AssignArticleJournal(context.Context, int, string) (api.Article, error)
 	ListJournals(context.Context) ([]api.Journal, error)
 	SavedTracks(context.Context) ([]string, error)
 	PlayTrack(context.Context, string) error
-	ControlPlayback(context.Context, string) error
+	ControlPlayback(context.Context, api.PlaybackAction) error
 	Dashboard(context.Context) (string, error)
 	Weather(context.Context, string) (string, error)
 	Notify(context.Context, string) error

@@ -2,10 +2,30 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
+
+// PlaybackAction is a Spotify playback control accepted by ControlPlayback.
+type PlaybackAction string
+
+// Playback actions supported by the Satellite API.
+const (
+	Pause    PlaybackAction = "pause"
+	Play     PlaybackAction = "play"
+	Next     PlaybackAction = "next"
+	Previous PlaybackAction = "previous"
+)
+
+func articlePath(id int) (string, error) {
+	if id <= 0 {
+		return "", fmt.Errorf("invalid article ID %d", id)
+	}
+	return JoinPath("api", "journals", "articles", strconv.Itoa(id))
+}
 
 // ListArticles returns recent articles, or all articles when all is true.
 func (c *Client) ListArticles(ctx context.Context, all bool) ([]Article, error) {
@@ -20,9 +40,13 @@ func (c *Client) ListArticles(ctx context.Context, all bool) ([]Article, error) 
 }
 
 // GetArticle returns an article's Markdown contents.
-func (c *Client) GetArticle(ctx context.Context, id string) (ArticleContents, error) {
+func (c *Client) GetArticle(ctx context.Context, id int) (ArticleContents, error) {
+	path, err := articlePath(id)
+	if err != nil {
+		return ArticleContents{}, err
+	}
 	var contents ArticleContents
-	err := c.GetJSON(ctx, JoinPath("api", "journals", "articles", id), nil, &contents)
+	err = c.GetJSON(ctx, path, nil, &contents)
 	return contents, err
 }
 
@@ -34,16 +58,24 @@ func (c *Client) CreateArticle(ctx context.Context, contents string) (Article, e
 }
 
 // UpdateArticleContents replaces an article's Markdown contents.
-func (c *Client) UpdateArticleContents(ctx context.Context, id, contents string) (Article, error) {
+func (c *Client) UpdateArticleContents(ctx context.Context, id int, contents string) (Article, error) {
+	path, err := articlePath(id)
+	if err != nil {
+		return Article{}, err
+	}
 	var article Article
-	err := c.SendJSON(ctx, http.MethodPut, JoinPath("api", "journals", "articles", id), articleContentsRequest{Contents: contents}, &article)
+	err = c.SendJSON(ctx, http.MethodPut, path, articleContentsRequest{Contents: contents}, &article)
 	return article, err
 }
 
 // AssignArticleJournal assigns an article to a journal by title.
-func (c *Client) AssignArticleJournal(ctx context.Context, id, journalTitle string) (Article, error) {
+func (c *Client) AssignArticleJournal(ctx context.Context, id int, journalTitle string) (Article, error) {
+	path, err := articlePath(id)
+	if err != nil {
+		return Article{}, err
+	}
 	var article Article
-	err := c.SendJSON(ctx, http.MethodPut, JoinPath("api", "journals", "articles", id), articleJournalRequest{Journal: journalTitle}, &article)
+	err = c.SendJSON(ctx, http.MethodPut, path, articleJournalRequest{Journal: journalTitle}, &article)
 	return article, err
 }
 
@@ -71,12 +103,25 @@ func (c *Client) SavedTracks(ctx context.Context) ([]string, error) {
 
 // PlayTrack starts playback for a Spotify track or album ID.
 func (c *Client) PlayTrack(ctx context.Context, id string) error {
-	return c.spotifyRequest(ctx, JoinPath("api", "albums", "play", id))
+	path, err := JoinPath("api", "albums", "play", id)
+	if err != nil {
+		return err
+	}
+	return c.spotifyRequest(ctx, path)
 }
 
-// ControlPlayback performs one of pause, play, next, or previous.
-func (c *Client) ControlPlayback(ctx context.Context, action string) error {
-	return c.spotifyRequest(ctx, JoinPath("api", "albums", "control", action))
+// ControlPlayback performs one of Pause, Play, Next or Previous.
+func (c *Client) ControlPlayback(ctx context.Context, action PlaybackAction) error {
+	switch action {
+	case Pause, Play, Next, Previous:
+	default:
+		return fmt.Errorf("invalid playback action %q", action)
+	}
+	path, err := JoinPath("api", "albums", "control", string(action))
+	if err != nil {
+		return err
+	}
+	return c.spotifyRequest(ctx, path)
 }
 
 func (c *Client) spotifyRequest(ctx context.Context, path string) error {
@@ -100,9 +145,13 @@ func (c *Client) Dashboard(ctx context.Context) (string, error) {
 // Weather returns a public plain-text forecast. Redirects follow the configured
 // HTTP client's policy because this request never carries authentication.
 func (c *Client) Weather(ctx context.Context, place string) (string, error) {
-	path := JoinPath("api", "wt")
+	segments := []string{"api", "wt"}
 	if place != "" {
-		path = JoinPath("api", "wt", place)
+		segments = append(segments, place)
+	}
+	path, err := JoinPath(segments...)
+	if err != nil {
+		return "", err
 	}
 	data, err := c.GetTextUnauthenticated(ctx, path, nil)
 	return string(data), err

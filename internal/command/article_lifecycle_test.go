@@ -21,10 +21,10 @@ import (
 type articleLifecycleAPI struct {
 	*stubAPI
 	list     func(context.Context, bool) ([]api.Article, error)
-	get      func(context.Context, string) (api.ArticleContents, error)
+	get      func(context.Context, int) (api.ArticleContents, error)
 	create   func(context.Context, string) (api.Article, error)
-	update   func(context.Context, string, string) (api.Article, error)
-	assign   func(context.Context, string, string) (api.Article, error)
+	update   func(context.Context, int, string) (api.Article, error)
+	assign   func(context.Context, int, string) (api.Article, error)
 	journals func(context.Context) ([]api.Journal, error)
 }
 
@@ -35,7 +35,7 @@ func (a *articleLifecycleAPI) ListArticles(ctx context.Context, all bool) ([]api
 	return a.list(ctx, all)
 }
 
-func (a *articleLifecycleAPI) GetArticle(ctx context.Context, id string) (api.ArticleContents, error) {
+func (a *articleLifecycleAPI) GetArticle(ctx context.Context, id int) (api.ArticleContents, error) {
 	if a.get == nil {
 		return api.ArticleContents{}, nil
 	}
@@ -49,14 +49,14 @@ func (a *articleLifecycleAPI) CreateArticle(ctx context.Context, contents string
 	return a.create(ctx, contents)
 }
 
-func (a *articleLifecycleAPI) UpdateArticleContents(ctx context.Context, id, contents string) (api.Article, error) {
+func (a *articleLifecycleAPI) UpdateArticleContents(ctx context.Context, id int, contents string) (api.Article, error) {
 	if a.update == nil {
 		return api.Article{}, nil
 	}
 	return a.update(ctx, id, contents)
 }
 
-func (a *articleLifecycleAPI) AssignArticleJournal(ctx context.Context, id, journal string) (api.Article, error) {
+func (a *articleLifecycleAPI) AssignArticleJournal(ctx context.Context, id int, journal string) (api.Article, error) {
 	if a.assign == nil {
 		return api.Article{}, nil
 	}
@@ -122,12 +122,13 @@ func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
 		return items[1], nil
 	}
 
-	var gotID, gotJournal string
+	var gotID int
+	var gotJournal string
 	var journalsCalls int
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, journals: func(context.Context) ([]api.Journal, error) {
 		journalsCalls++
 		return []api.Journal{{ID: 3, Title: "Default"}, {ID: 7, Title: "Work"}}, nil
-	}, assign: func(_ context.Context, id, journal string) (api.Article, error) {
+	}, assign: func(_ context.Context, id int, journal string) (api.Article, error) {
 		gotID, gotJournal = id, journal
 		return api.Article{}, nil
 	}}
@@ -136,14 +137,14 @@ func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "12", ""); err != nil {
+	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, 12, ""); err != nil {
 		t.Fatal(err)
 	}
 	if journalsCalls != 1 {
 		t.Fatalf("ListJournals() calls = %d, want 1", journalsCalls)
 	}
-	if gotID != "12" || gotJournal != "Work" {
-		t.Fatalf("AssignArticleJournal() = (%q, %q), want (12, Work)", gotID, gotJournal)
+	if gotID != 12 || gotJournal != "Work" {
+		t.Fatalf("AssignArticleJournal() = (%d, %q), want (12, Work)", gotID, gotJournal)
 	}
 	wantItems := []ui.Item{{ID: "Default", Columns: []string{"Default"}}, {ID: "Work", Columns: []string{"Work"}}}
 	if !reflect.DeepEqual(selected, wantItems) {
@@ -163,7 +164,7 @@ func TestArticleAssignUsesReturnedJournalOrder(t *testing.T) {
 
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, journals: func(context.Context) ([]api.Journal, error) {
 		return []api.Journal{{ID: 3, Title: "Default"}, {ID: 7, Title: "Notes"}}, nil
-	}, assign: func(_ context.Context, _, journal string) (api.Article, error) {
+	}, assign: func(_ context.Context, _ int, journal string) (api.Article, error) {
 		if journal != "Default" {
 			t.Fatalf("journal = %q, want first/default journal", journal)
 		}
@@ -171,7 +172,7 @@ func TestArticleAssignUsesReturnedJournalOrder(t *testing.T) {
 	}}
 	app, store, _, _ := newArticleLifecycleApp(t, client)
 
-	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", ""); err != nil {
+	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists, err := store.ReadCacheLines("journals"); err != nil || exists {
@@ -184,12 +185,12 @@ func TestArticleAssignUsesSuppliedTitleDirectly(t *testing.T) {
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, journals: func(context.Context) ([]api.Journal, error) {
 		t.Fatal("ListJournals() called with supplied title")
 		return nil, nil
-	}, assign: func(_ context.Context, _, journal string) (api.Article, error) {
+	}, assign: func(_ context.Context, _ int, journal string) (api.Article, error) {
 		gotJournal = journal
 		return api.Article{}, nil
 	}}
 	app, _, _, _ := newArticleLifecycleApp(t, client)
-	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", "Journal with spaces"); err != nil {
+	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, 1, "Journal with spaces"); err != nil {
 		t.Fatal(err)
 	}
 	if gotJournal != "Journal with spaces" {
@@ -199,7 +200,7 @@ func TestArticleAssignUsesSuppliedTitleDirectly(t *testing.T) {
 
 func TestArticleAssignFailureKeepsArticleCache(t *testing.T) {
 	wantErr := errors.New("assignment failed")
-	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, assign: func(context.Context, string, string) (api.Article, error) {
+	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, assign: func(context.Context, int, string) (api.Article, error) {
 		return api.Article{}, wantErr
 	}}
 	app, store, _, _ := newArticleLifecycleApp(t, client)
@@ -207,7 +208,7 @@ func TestArticleAssignFailureKeepsArticleCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := assignArticle(context.Background(), &cobra.Command{}, app, client, "1", "Default")
+	err := assignArticle(context.Background(), &cobra.Command{}, app, client, 1, "Default")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Execute() error = %v, want %v", err, wantErr)
 	}
@@ -225,11 +226,12 @@ func TestSaveArticleRequiresContents(t *testing.T) {
 }
 
 func TestSaveArticleCreateThenUpdateLifecycle(t *testing.T) {
-	var createdContents, updatedID, updatedContents string
+	var createdContents, updatedContents string
+	var updatedID int
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, create: func(_ context.Context, contents string) (api.Article, error) {
 		createdContents = contents
 		return api.Article{ID: 42, WordCount: 3}, nil
-	}, update: func(_ context.Context, id, contents string) (api.Article, error) {
+	}, update: func(_ context.Context, id int, contents string) (api.Article, error) {
 		updatedID, updatedContents = id, contents
 		return api.Article{ID: 42, WordCount: 5}, nil
 	}}
@@ -275,17 +277,37 @@ func TestSaveArticleCreateThenUpdateLifecycle(t *testing.T) {
 	if _, err := saveArticle(context.Background(), app, client, workDir); err != nil {
 		t.Fatal(err)
 	}
-	if updatedID != "42" || updatedContents != "updated article contents" {
-		t.Fatalf("UpdateArticleContents() = (%q, %q)", updatedID, updatedContents)
+	if updatedID != 42 || updatedContents != "updated article contents" {
+		t.Fatalf("UpdateArticleContents() = (%d, %q)", updatedID, updatedContents)
 	}
 	if stdout.String() != "Word count: 3\nWord count: 5\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
+func TestSaveArticleRejectsInvalidWorkspaceID(t *testing.T) {
+	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, update: func(context.Context, int, string) (api.Article, error) {
+		t.Fatal("UpdateArticleContents() called with an invalid ID")
+		return api.Article{}, nil
+	}}
+	app, _, _, _ := newArticleLifecycleApp(t, client)
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "contents.md"), []byte("text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "id"), []byte("..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := saveArticle(context.Background(), app, client, workDir)
+	if err == nil || !strings.Contains(err.Error(), "invalid article ID") {
+		t.Fatalf("saveArticle() error = %v, want invalid article ID", err)
+	}
+}
+
 func TestSaveArticleFailureKeepsIDAndCacheButCreatesBackup(t *testing.T) {
 	wantErr := errors.New("update failed")
-	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, update: func(context.Context, string, string) (api.Article, error) {
+	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, update: func(context.Context, int, string) (api.Article, error) {
 		return api.Article{}, wantErr
 	}}
 	app, store, stdout, _ := newArticleLifecycleApp(t, client)

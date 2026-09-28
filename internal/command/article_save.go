@@ -71,12 +71,14 @@ func saveArticle(ctx context.Context, app *App, client APIClient, workDir string
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return api.Article{}, fmt.Errorf("read article ID: %w", err)
 	}
-	id := strings.TrimSpace(string(idBytes))
-
 	var article api.Article
-	if id == "" {
+	if strings.TrimSpace(string(idBytes)) == "" {
 		article, err = client.CreateArticle(ctx, string(contents))
 	} else {
+		id, parseErr := parseArticleID(string(idBytes))
+		if parseErr != nil {
+			return api.Article{}, fmt.Errorf("read article ID: %w", parseErr)
+		}
 		article, err = client.UpdateArticleContents(ctx, id, string(contents))
 	}
 	if err != nil {

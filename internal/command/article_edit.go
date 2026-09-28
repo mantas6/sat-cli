@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const articleWorkspaceMaxAge = 30 * 24 * time.Hour
+const (
+	articleWorkspaceMaxAge = 30 * 24 * time.Hour
+	// newArticleItemID identifies the "New" entry in the article edit picker.
+	newArticleItemID = "new"
+)
 
 var (
 	executablePath = os.Executable
@@ -28,8 +33,8 @@ func newArticleEditCommand(app *App) *cobra.Command {
 		Short: "Edit a journal article",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			articleID := strings.TrimSpace(id)
-			if command.Flags().Changed("id") && articleID == "" {
+			rawID := strings.TrimSpace(id)
+			if command.Flags().Changed("id") && rawID == "" {
 				return errors.New("article ID must not be empty")
 			}
 
@@ -37,7 +42,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if articleID == "" {
+			if rawID == "" {
 				articles, err := client.ListArticles(command.Context(), false)
 				if err != nil {
 					return err
@@ -46,7 +51,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 				for index, article := range articles {
 					lines[index] = articleLine(article)
 				}
-				items := append([]ui.Item{{ID: "0", Columns: []string{"New"}}}, reverseItems(parseArticleLines(lines))...)
+				items := append([]ui.Item{{ID: newArticleItemID, Columns: []string{"New"}}}, reverseItems(parseArticleLines(lines))...)
 				item, err := selectItem(command, app, items, ui.SelectOptions{
 					Title: "Articles",
 					Query: strings.Join(args, " "),
@@ -54,10 +59,17 @@ func newArticleEditCommand(app *App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				articleID = item.ID
+				if item.ID == newArticleItemID {
+					return editArticle(command.Context(), command, app, client, 0, true)
+				}
+				rawID = item.ID
+			}
+			articleID, err := parseArticleID(rawID)
+			if err != nil {
+				return err
 			}
 
-			return editArticle(command.Context(), command, app, client, articleID)
+			return editArticle(command.Context(), command, app, client, articleID, false)
 		},
 	}
 	command.Flags().StringVar(&id, "id", "", "article ID")
@@ -74,12 +86,14 @@ func newArticleNewCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return editArticle(command.Context(), command, app, client, "new")
+			return editArticle(command.Context(), command, app, client, 0, true)
 		},
 	}
 }
 
-func editArticle(ctx context.Context, command *cobra.Command, app *App, client APIClient, id string) error {
+// editArticle opens the article with id in the editor, or an empty workspace
+// when isNew is true (id is then ignored).
+func editArticle(ctx context.Context, command *cobra.Command, app *App, client APIClient, id int, isNew bool) error {
 	tmpDir, err := app.Config.TmpDir()
 	if err != nil {
 		return err
@@ -91,7 +105,6 @@ func editArticle(ctx context.Context, command *cobra.Command, app *App, client A
 		return fmt.Errorf("create article workspace: %w", err)
 	}
 	contentsPath := filepath.Join(workDir, "contents.md")
-	isNew := id == "0" || strings.EqualFold(id, "new")
 	if !isNew {
 		article, err := client.GetArticle(ctx, id)
 		if err != nil {
@@ -100,7 +113,7 @@ func editArticle(ctx context.Context, command *cobra.Command, app *App, client A
 		if err := os.WriteFile(contentsPath, []byte(article.Contents), 0o600); err != nil {
 			return fmt.Errorf("write article contents: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(workDir, "id"), []byte(id+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(workDir, "id"), []byte(strconv.Itoa(id)+"\n"), 0o600); err != nil {
 			return fmt.Errorf("write article ID: %w", err)
 		}
 	}
@@ -134,7 +147,11 @@ func editArticle(ctx context.Context, command *cobra.Command, app *App, client A
 		_, err := fmt.Fprintln(app.Stderr, "Nothing saved.")
 		return err
 	}
-	return assignArticle(ctx, command, app, client, strings.TrimSpace(string(idBytes)), "")
+	savedID, err := parseArticleID(string(idBytes))
+	if err != nil {
+		return err
+	}
+	return assignArticle(ctx, command, app, client, savedID, "")
 }
 
 func vimString(value string) string {

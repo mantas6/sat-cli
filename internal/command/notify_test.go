@@ -18,7 +18,7 @@ func (s *stubAPI) ListArticles(context.Context, bool) ([]api.Article, error) {
 	return nil, nil
 }
 
-func (s *stubAPI) GetArticle(context.Context, string) (api.ArticleContents, error) {
+func (s *stubAPI) GetArticle(context.Context, int) (api.ArticleContents, error) {
 	return api.ArticleContents{}, nil
 }
 
@@ -26,11 +26,11 @@ func (s *stubAPI) CreateArticle(context.Context, string) (api.Article, error) {
 	return api.Article{}, nil
 }
 
-func (s *stubAPI) UpdateArticleContents(context.Context, string, string) (api.Article, error) {
+func (s *stubAPI) UpdateArticleContents(context.Context, int, string) (api.Article, error) {
 	return api.Article{}, nil
 }
 
-func (s *stubAPI) AssignArticleJournal(context.Context, string, string) (api.Article, error) {
+func (s *stubAPI) AssignArticleJournal(context.Context, int, string) (api.Article, error) {
 	return api.Article{}, nil
 }
 
@@ -46,7 +46,7 @@ func (s *stubAPI) PlayTrack(context.Context, string) error {
 	return nil
 }
 
-func (s *stubAPI) ControlPlayback(context.Context, string) error {
+func (s *stubAPI) ControlPlayback(context.Context, api.PlaybackAction) error {
 	return nil
 }
 

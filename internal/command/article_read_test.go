@@ -43,8 +43,8 @@ func TestArticleReadWithIDSkipsSelector(t *testing.T) {
 		return ui.Item{}, nil
 	}
 
-	var gotID string
-	client := &articleAPI{stubAPI: &stubAPI{}, get: func(_ context.Context, id string) (api.ArticleContents, error) {
+	var gotID int
+	client := &articleAPI{stubAPI: &stubAPI{}, get: func(_ context.Context, id int) (api.ArticleContents, error) {
 		gotID = id
 		return api.ArticleContents{Contents: "contents"}, nil
 	}}
@@ -52,8 +52,8 @@ func TestArticleReadWithIDSkipsSelector(t *testing.T) {
 	if err := executeArticleTestCommand(app, "article", "read", "--id", "27"); err != nil {
 		t.Fatal(err)
 	}
-	if gotID != "27" {
-		t.Fatalf("GetArticle() ID = %q, want 27", gotID)
+	if gotID != 27 {
+		t.Fatalf("GetArticle() ID = %d, want 27", gotID)
 	}
 }
 
@@ -66,7 +66,7 @@ func TestArticleReadPassesJoinedQueryToSelector(t *testing.T) {
 		return items[0], nil
 	}
 
-	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, string) (api.ArticleContents, error) {
+	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
 		return api.ArticleContents{Contents: "contents"}, nil
 	}}
 	store := &cacheConfig{
@@ -84,7 +84,7 @@ func TestArticleReadPassesJoinedQueryToSelector(t *testing.T) {
 }
 
 func TestArticleReadWritesExactRawContentForNonTerminal(t *testing.T) {
-	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, string) (api.ArticleContents, error) {
+	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
 		return api.ArticleContents{Contents: "# Heading\n\nBody"}, nil
 	}}
 	app, stdout := newArticleTestApp(client, nil)
@@ -109,7 +109,7 @@ func TestArticleReadRawFlagBypassesPagerOnTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
-	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, string) (api.ArticleContents, error) {
+	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
 		return api.ArticleContents{Contents: "raw\n"}, nil
 	}}
 	app, _ := newArticleTestApp(client, nil)
@@ -141,7 +141,7 @@ func TestArticleReadInvokesPagerForTerminal(t *testing.T) {
 		return nil
 	}
 
-	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, string) (api.ArticleContents, error) {
+	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
 		return api.ArticleContents{Contents: "# Markdown"}, nil
 	}}
 	app, _ := newArticleTestApp(client, nil)
@@ -161,7 +161,7 @@ func TestArticleReadInvokesPagerForTerminal(t *testing.T) {
 
 func TestArticleReadAPIErrorPropagates(t *testing.T) {
 	wantErr := errors.New("get article failed")
-	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, string) (api.ArticleContents, error) {
+	client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
 		return api.ArticleContents{}, wantErr
 	}}
 	app, _ := newArticleTestApp(client, nil)

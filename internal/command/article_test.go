@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mantas6/sat-cli/internal/api"
@@ -13,7 +14,7 @@ import (
 type articleAPI struct {
 	*stubAPI
 	list func(context.Context, bool) ([]api.Article, error)
-	get  func(context.Context, string) (api.ArticleContents, error)
+	get  func(context.Context, int) (api.ArticleContents, error)
 }
 
 func (a *articleAPI) ListArticles(ctx context.Context, all bool) ([]api.Article, error) {
@@ -23,7 +24,7 @@ func (a *articleAPI) ListArticles(ctx context.Context, all bool) ([]api.Article,
 	return a.list(ctx, all)
 }
 
-func (a *articleAPI) GetArticle(ctx context.Context, id string) (api.ArticleContents, error) {
+func (a *articleAPI) GetArticle(ctx context.Context, id int) (api.ArticleContents, error) {
 	if a.get == nil {
 		return api.ArticleContents{}, nil
 	}
@@ -128,5 +129,38 @@ func TestCachedArticleItemsCacheMissFetchesAllAndWritesCache(t *testing.T) {
 	}
 	if stderr.String() != "Fetching articles list...\n" {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestParseArticleID(t *testing.T) {
+	for input, want := range map[string]int{"1": 1, " 42\n": 42} {
+		if got, err := parseArticleID(input); err != nil || got != want {
+			t.Fatalf("parseArticleID(%q) = %d, %v; want %d", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"", "0", "-3", "..", "new", "12a"} {
+		if got, err := parseArticleID(input); err == nil {
+			t.Fatalf("parseArticleID(%q) = %d, want error", input, got)
+		}
+	}
+}
+
+func TestArticleCommandsRejectInvalidIDs(t *testing.T) {
+	for _, args := range [][]string{
+		{"article", "read", "--id", ".."},
+		{"article", "read", "--id", "0"},
+		{"article", "edit", "--id", "new"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
+				t.Fatal("GetArticle() called with an invalid ID")
+				return api.ArticleContents{}, nil
+			}}
+			app, _ := newArticleTestApp(client, nil)
+			err := executeArticleTestCommand(app, args...)
+			if err == nil || !strings.Contains(err.Error(), "invalid article ID") {
+				t.Fatalf("Execute() error = %v, want invalid article ID", err)
+			}
+		})
 	}
 }

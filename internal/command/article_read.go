@@ -20,8 +20,8 @@ func newArticleReadCommand(app *App) *cobra.Command {
 		Short: "Read a journal article",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			articleID := strings.TrimSpace(id)
-			if cmd.Flags().Changed("id") && articleID == "" {
+			rawID := strings.TrimSpace(id)
+			if cmd.Flags().Changed("id") && rawID == "" {
 				return errors.New("article ID must not be empty")
 			}
 
@@ -29,7 +29,7 @@ func newArticleReadCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if articleID == "" {
+			if rawID == "" {
 				items, err := cachedArticleItems(cmd.Context(), app, client, true)
 				if err != nil {
 					return err
@@ -41,7 +41,11 @@ func newArticleReadCommand(app *App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				articleID = item.ID
+				rawID = item.ID
+			}
+			articleID, err := parseArticleID(rawID)
+			if err != nil {
+				return err
 			}
 
 			article, err := client.GetArticle(cmd.Context(), articleID)

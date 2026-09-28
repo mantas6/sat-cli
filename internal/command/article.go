@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mantas6/sat-cli/internal/api"
@@ -33,6 +34,16 @@ func newArticleCommand(app *App) *cobra.Command {
 		newArticleSaveCommand(app),
 	)
 	return command
+}
+
+// parseArticleID converts an article ID from a flag, selector item or
+// workspace file into the positive integer the API expects.
+func parseArticleID(value string) (int, error) {
+	id, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid article ID %q", value)
+	}
+	return id, nil
 }
 
 func articleLine(article api.Article) string {

@@ -17,7 +17,7 @@ type musicAPI struct {
 	*stubAPI
 	saved   func(context.Context) ([]string, error)
 	play    func(context.Context, string) error
-	control func(context.Context, string) error
+	control func(context.Context, api.PlaybackAction) error
 }
 
 func (m *musicAPI) SavedTracks(ctx context.Context) ([]string, error) {
@@ -34,7 +34,7 @@ func (m *musicAPI) PlayTrack(ctx context.Context, id string) error {
 	return m.play(ctx, id)
 }
 
-func (m *musicAPI) ControlPlayback(ctx context.Context, action string) error {
+func (m *musicAPI) ControlPlayback(ctx context.Context, action api.PlaybackAction) error {
 	if m.control == nil {
 		return nil
 	}
@@ -201,16 +201,16 @@ func TestMusicPlaySingleMatchSkipsSelectorWithoutTerminal(t *testing.T) {
 }
 
 func TestMusicControlsMapActions(t *testing.T) {
-	tests := map[string]string{
-		"pause":    "pause",
-		"resume":   "play",
-		"next":     "next",
-		"previous": "previous",
+	tests := map[string]api.PlaybackAction{
+		"pause":    api.Pause,
+		"resume":   api.Play,
+		"next":     api.Next,
+		"previous": api.Previous,
 	}
 	for command, wantAction := range tests {
 		t.Run(command, func(t *testing.T) {
-			var gotAction string
-			client := &musicAPI{stubAPI: &stubAPI{}, control: func(_ context.Context, action string) error {
+			var gotAction api.PlaybackAction
+			client := &musicAPI{stubAPI: &stubAPI{}, control: func(_ context.Context, action api.PlaybackAction) error {
 				gotAction = action
 				return nil
 			}}

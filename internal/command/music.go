@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mantas6/sat-cli/internal/api"
 	"github.com/mantas6/sat-cli/internal/config"
 	"github.com/mantas6/sat-cli/internal/ui"
 	"github.com/spf13/cobra"
@@ -25,10 +26,10 @@ func newMusicCommand(app *App) *cobra.Command {
 	command.AddCommand(
 		newMusicSyncCommand(app),
 		newMusicPlayCommand(app),
-		newMusicControlCommand(app, "pause", "pause"),
-		newMusicControlCommand(app, "resume", "play"),
-		newMusicControlCommand(app, "next", "next"),
-		newMusicControlCommand(app, "previous", "previous"),
+		newMusicControlCommand(app, "pause", api.Pause),
+		newMusicControlCommand(app, "resume", api.Play),
+		newMusicControlCommand(app, "next", api.Next),
+		newMusicControlCommand(app, "previous", api.Previous),
 	)
 	return command
 }
@@ -97,7 +98,7 @@ func newMusicPlayCommand(app *App) *cobra.Command {
 	return command
 }
 
-func newMusicControlCommand(app *App, name, action string) *cobra.Command {
+func newMusicControlCommand(app *App, name string, action api.PlaybackAction) *cobra.Command {
 	return &cobra.Command{
 		Use:   name,
 		Short: strings.ToUpper(name[:1]) + name[1:] + " playback",

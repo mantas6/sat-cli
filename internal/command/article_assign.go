@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func assignArticle(ctx context.Context, command *cobra.Command, app *App, client APIClient, id, journal string) error {
+func assignArticle(ctx context.Context, command *cobra.Command, app *App, client APIClient, id int, journal string) error {
 	if journal == "" {
 		journals, err := client.ListJournals(ctx)
 		if err != nil {
