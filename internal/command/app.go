@@ -126,8 +126,9 @@ func NewDefaultApp() (*App, error) {
 // NewDefaultApp.
 func normalizeApp(app *App) {
 	if app.NewAPIClient == nil {
+		// Version is read when the client is built, after main has set it.
 		app.NewAPIClient = func(baseURL, token string) (APIClient, error) {
-			return api.NewClient(baseURL, token)
+			return api.NewClient(baseURL, token, api.WithUserAgent("sat-cli/"+app.Version))
 		}
 	}
 	if app.Stdin == nil {

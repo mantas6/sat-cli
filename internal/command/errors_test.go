@@ -29,17 +29,17 @@ func TestLoginHintOnCredentialErrors(t *testing.T) {
 		{name: "missing token", baseURL: "https://sat.example", args: []string{"notify", "hi"}, sentinel: config.ErrTokenMissing, wantHint: true},
 		{
 			name: "unauthorized", baseURL: "https://sat.example", token: "secret", args: []string{"notify", "hi"},
-			client:   notifyErr(&api.HTTPError{Status: http.StatusUnauthorized, Method: http.MethodPost, Path: "/api/notify"}),
+			client:   notifyErr(&api.HTTPError{StatusCode: http.StatusUnauthorized, Method: http.MethodPost, Path: "/api/notify"}),
 			sentinel: api.ErrUnauthorized, wantHint: true,
 		},
 		{
 			name: "forbidden", baseURL: "https://sat.example", token: "secret", args: []string{"notify", "hi"},
-			client:   notifyErr(&api.HTTPError{Status: http.StatusForbidden, Method: http.MethodPost, Path: "/api/notify"}),
+			client:   notifyErr(&api.HTTPError{StatusCode: http.StatusForbidden, Method: http.MethodPost, Path: "/api/notify"}),
 			sentinel: api.ErrForbidden,
 		},
 		{
 			name: "server error", baseURL: "https://sat.example", token: "secret", args: []string{"notify", "hi"},
-			client: notifyErr(&api.HTTPError{Status: http.StatusInternalServerError, Method: http.MethodPost, Path: "/api/notify"}),
+			client: notifyErr(&api.HTTPError{StatusCode: http.StatusInternalServerError, Method: http.MethodPost, Path: "/api/notify"}),
 		},
 	}
 	for _, test := range tests {

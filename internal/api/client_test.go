@@ -215,7 +215,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 			if !errors.As(err, &httpError) {
 				t.Fatalf("error type = %T (%v)", err, err)
 			}
-			if httpError.Status != test.status || httpError.Method != http.MethodGet || httpError.Path != "/failure" {
+			if httpError.StatusCode != test.status || httpError.Method != http.MethodGet || httpError.Path != "/failure" {
 				t.Fatalf("HTTPError = %#v", httpError)
 			}
 			if !strings.Contains(err.Error(), test.want) {
@@ -273,9 +273,132 @@ func TestTimeoutAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	client = newTestClient(t, server.URL, "")
-	if _, err := client.GetText(ctx, "/canceled", nil); err != context.Canceled {
-		t.Fatalf("cancellation error = %T %v", err, err)
+	if _, err := client.GetText(ctx, "/canceled", nil); !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "GET /canceled: ") {
+		t.Fatalf("cancellation error = %T %v, want context.Canceled prefixed with the request", err, err)
 	}
+}
+
+func TestClientOptionsAreOrderIndependent(t *testing.T) {
+	t.Parallel()
+	base := &http.Client{Timeout: time.Minute}
+	tests := []struct {
+		name    string
+		options []Option
+		want    time.Duration
+	}{
+		{"default", nil, defaultTimeout},
+		{"timeout only", []Option{WithTimeout(time.Second)}, time.Second},
+		{"http client keeps its timeout", []Option{WithHTTPClient(base)}, time.Minute},
+		{"http client without timeout gets default", []Option{WithHTTPClient(&http.Client{})}, defaultTimeout},
+		{"timeout before http client", []Option{WithTimeout(time.Second), WithHTTPClient(base)}, time.Second},
+		{"timeout after http client", []Option{WithHTTPClient(base), WithTimeout(time.Second)}, time.Second},
+		{"nil http client ignored", []Option{WithHTTPClient(nil), WithTimeout(time.Second)}, time.Second},
+		{"non-positive timeout ignored", []Option{WithTimeout(-1)}, defaultTimeout},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			client, err := NewClient("https://sat.example", "token", test.options...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if client.authHTTP.Timeout != test.want || client.publicHTTP.Timeout != test.want {
+				t.Fatalf("timeouts = %v/%v, want %v", client.authHTTP.Timeout, client.publicHTTP.Timeout, test.want)
+			}
+		})
+	}
+	if base.Timeout != time.Minute || base.CheckRedirect != nil {
+		t.Fatalf("WithHTTPClient mutated the caller's client: %#v", base)
+	}
+}
+
+func TestWithHTTPClientTransportAndUserAgent(t *testing.T) {
+	t.Parallel()
+	var calls int
+	var mu sync.Mutex
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		if got := request.Header.Get("User-Agent"); got != "sat-cli/1.2.3" {
+			t.Errorf("user agent = %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"text/plain"}},
+			Body:       io.NopCloser(strings.NewReader("via transport")),
+			Request:    request,
+		}, nil
+	})
+	client, err := NewClient("https://sat.example", "token",
+		WithHTTPClient(&http.Client{Transport: transport}), WithUserAgent("sat-cli/1.2.3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := client.Dashboard(context.Background()); err != nil || got != "via transport" {
+		t.Fatalf("Dashboard() = %q, %v", got, err)
+	}
+	if got, err := client.Weather(context.Background(), ""); err != nil || got != "via transport" {
+		t.Fatalf("Weather() = %q, %v", got, err)
+	}
+	if calls != 2 {
+		t.Fatalf("transport calls = %d, want 2", calls)
+	}
+}
+
+func TestTransportErrorsNameTheRequest(t *testing.T) {
+	t.Parallel()
+	cause := errors.New("connection refused")
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, cause })
+	client, err := NewClient("https://sat.example/prefix", "token", WithHTTPClient(&http.Client{Transport: transport}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Dashboard(context.Background())
+	if !errors.Is(err, cause) || err.Error() != "GET /prefix/api/dash: connection refused" {
+		t.Fatalf("Dashboard() error = %q, want the request and cause only", err)
+	}
+}
+
+func TestTextResponsesAreBounded(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.Copy(writer, io.LimitReader(neverEnding('x'), maxTextBody+10))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "token")
+	if got, err := client.Dashboard(context.Background()); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("Dashboard() = %d bytes, %v; want size error", len(got), err)
+	}
+}
+
+func TestJSONContentTypeOnlyWithBody(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("Content-Type"); got != "" {
+			t.Errorf("%s content type = %q, want none without a body", request.Method, got)
+		}
+		writeJSON(t, writer, []Journal{})
+	}))
+	defer server.Close()
+
+	if _, err := newTestClient(t, server.URL, "token").ListJournals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+type neverEnding byte
+
+func (b neverEnding) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = byte(b)
+	}
+	return len(p), nil
 }
 
 func TestSpotifyErrorOnSuccessfulResponse(t *testing.T) {
@@ -337,7 +460,7 @@ func TestAuthenticatedRequestsDoNotFollowRedirects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := call()
 			var httpError *HTTPError
-			if !errors.As(err, &httpError) || httpError.Status != http.StatusFound {
+			if !errors.As(err, &httpError) || httpError.StatusCode != http.StatusFound {
 				t.Fatalf("error = %T %v, want HTTP 302 HTTPError", err, err)
 			}
 		})

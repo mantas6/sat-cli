@@ -16,43 +16,58 @@ import (
 )
 
 const (
-	defaultTimeout = 30 * time.Second
-	maxErrorBody   = 1024
-	userAgent      = "sat-cli"
-	redacted       = "[REDACTED]"
-	textAccept     = "application/json, text/plain;q=0.9"
+	defaultTimeout   = 30 * time.Second
+	defaultUserAgent = "sat-cli"
+	maxErrorBody     = 1024
+	// maxTextBody bounds plain-text and form responses read into memory.
+	maxTextBody = 8 << 20
+	redacted    = "[REDACTED]"
+	textAccept  = "application/json, text/plain;q=0.9"
 )
 
 // Client calls a Satellite server.
 type Client struct {
 	baseURL   *url.URL
 	token     string
+	userAgent string
+	// authHTTP carries the bearer token and never follows redirects.
+	authHTTP *http.Client
+	// publicHTTP is used for unauthenticated requests and keeps the
+	// configured redirect policy.
+	publicHTTP *http.Client
+}
+
+type clientOptions struct {
 	http      *http.Client
+	timeout   time.Duration
 	userAgent string
 }
 
-// Option customizes a Client.
-type Option func(*Client)
+// Option customizes a Client. Options may be given in any order.
+type Option func(*clientOptions)
 
 // WithHTTPClient makes a Client use the supplied HTTP transport and settings.
-// A zero Timeout is replaced with the default timeout.
+// A nil client is ignored. When neither the client nor WithTimeout sets a
+// timeout, the default timeout applies.
 func WithHTTPClient(client *http.Client) Option {
-	return func(target *Client) {
-		if client == nil {
-			return
-		}
-		clone := *client
-		if clone.Timeout == 0 {
-			clone.Timeout = defaultTimeout
-		}
-		target.http = &clone
+	return func(options *clientOptions) {
+		options.http = client
 	}
 }
 
-// WithTimeout sets the overall HTTP request timeout.
+// WithTimeout sets the overall HTTP request timeout, overriding the timeout
+// of a client given to WithHTTPClient. A non-positive timeout is ignored.
 func WithTimeout(timeout time.Duration) Option {
-	return func(client *Client) {
-		client.http.Timeout = timeout
+	return func(options *clientOptions) {
+		options.timeout = timeout
+	}
+}
+
+// WithUserAgent sets the User-Agent header sent with every request, for
+// example "sat-cli/1.2.3". An empty value keeps the default "sat-cli".
+func WithUserAgent(userAgent string) Option {
+	return func(options *clientOptions) {
+		options.userAgent = strings.TrimSpace(userAgent)
 	}
 }
 
@@ -66,20 +81,39 @@ func NewClient(baseURL, token string, options ...Option) (*Client, error) {
 		return nil, fmt.Errorf("invalid base URL %q: use an absolute http or https URL", strings.TrimSpace(baseURL))
 	}
 
-	client := &Client{
-		baseURL:   parsed,
-		token:     strings.TrimSpace(token),
-		http:      &http.Client{Timeout: defaultTimeout},
-		userAgent: userAgent,
-	}
+	settings := clientOptions{}
 	for _, option := range options {
-		option(client)
-	}
-	if client.http == nil {
-		client.http = &http.Client{Timeout: defaultTimeout}
+		option(&settings)
 	}
 
-	return client, nil
+	public := &http.Client{}
+	if settings.http != nil {
+		clone := *settings.http
+		public = &clone
+	}
+	switch {
+	case settings.timeout > 0:
+		public.Timeout = settings.timeout
+	case public.Timeout <= 0:
+		public.Timeout = defaultTimeout
+	}
+	authenticated := *public
+	authenticated.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	userAgent := settings.userAgent
+	if userAgent == "" {
+		userAgent = defaultUserAgent
+	}
+
+	return &Client{
+		baseURL:    parsed,
+		token:      strings.TrimSpace(token),
+		userAgent:  userAgent,
+		authHTTP:   &authenticated,
+		publicHTTP: public,
+	}, nil
 }
 
 // GetJSON performs an authenticated GET request and decodes its JSON response.
@@ -131,7 +165,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode %s request body: %w", method, err)
+			return fmt.Errorf("%s %s: encode request body: %w", method, path, err)
 		}
 		reader = bytes.NewReader(data)
 	}
@@ -141,7 +175,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		return err
 	}
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 
 	response, err := c.do(request, authenticated)
 	if err != nil {
@@ -150,15 +186,17 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	defer response.Body.Close()
 
 	if out == nil || response.StatusCode == http.StatusNoContent {
-		_, err = io.Copy(io.Discard, response.Body)
-		return err
+		if _, err := io.Copy(io.Discard, response.Body); err != nil {
+			return requestError(request, "read response", err)
+		}
+		return nil
 	}
 	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
 		if errors.Is(err, io.EOF) {
 			// An empty success body leaves out at its zero value.
 			return nil
 		}
-		return fmt.Errorf("decode %s %s response: %w", method, path, err)
+		return requestError(request, "decode response", err)
 	}
 	// Drain trailing bytes so the connection can be reused.
 	_, _ = io.Copy(io.Discard, response.Body)
@@ -174,7 +212,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, query url.
 
 	request, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
-		return nil, fmt.Errorf("create %s request: %w", method, err)
+		return nil, fmt.Errorf("%s %s: create request: %w", method, path, err)
 	}
 	request.Header.Set("User-Agent", c.userAgent)
 	if authenticated && c.token != "" {
@@ -206,28 +244,34 @@ func (c *Client) doBytes(request *http.Request, authenticated bool) ([]byte, err
 	}
 	defer response.Body.Close()
 
-	data, err := io.ReadAll(response.Body)
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxTextBody+1))
 	if err != nil {
-		return nil, fmt.Errorf("read %s %s response: %w", request.Method, request.URL.EscapedPath(), err)
+		return nil, requestError(request, "read response", err)
+	}
+	if len(data) > maxTextBody {
+		return nil, requestError(request, "read response", fmt.Errorf("body exceeds %d bytes", maxTextBody))
 	}
 
 	return data, nil
 }
 
 func (c *Client) do(request *http.Request, authenticated bool) (*http.Response, error) {
-	httpClient := *c.http
+	httpClient := c.publicHTTP
 	if authenticated {
-		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
+		httpClient = c.authHTTP
 	}
 
 	response, err := httpClient.Do(request)
 	if err != nil {
-		if request.Context().Err() != nil {
-			return nil, request.Context().Err()
+		if ctxErr := request.Context().Err(); ctxErr != nil {
+			return nil, requestError(request, "", ctxErr)
 		}
-		return nil, err
+		// *url.Error repeats the method and full URL; keep only the cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return nil, requestError(request, "", err)
 	}
 	if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
 		return response, nil
@@ -239,17 +283,27 @@ func (c *Client) do(request *http.Request, authenticated bool) (*http.Response, 
 	limit := int64(maxErrorBody + len(c.token) + 1)
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, limit))
 	if readErr != nil {
-		return nil, fmt.Errorf("read error response from %s %s: %w", request.Method, request.URL.EscapedPath(), readErr)
+		return nil, requestError(request, "read error response", readErr)
 	}
 	responseBody, truncated := c.redactErrorBody(string(body), int64(len(body)) == limit)
 
 	return nil, &HTTPError{
-		Status:    response.StatusCode,
-		Method:    request.Method,
-		Path:      request.URL.EscapedPath(),
-		Body:      responseBody,
-		Truncated: truncated,
+		StatusCode: response.StatusCode,
+		Method:     request.Method,
+		Path:       request.URL.EscapedPath(),
+		Body:       responseBody,
+		Message:    jsonMessage(responseBody),
+		Truncated:  truncated,
 	}
+}
+
+// requestError formats err as "METHOD /escaped/path: action: err", omitting
+// the action when it is empty.
+func requestError(request *http.Request, action string, err error) error {
+	if action == "" {
+		return fmt.Errorf("%s %s: %w", request.Method, request.URL.EscapedPath(), err)
+	}
+	return fmt.Errorf("%s %s: %s: %w", request.Method, request.URL.EscapedPath(), action, err)
 }
 
 // redactErrorBody removes the bearer token from an error body and bounds it to

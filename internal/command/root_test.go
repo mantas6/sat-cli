@@ -2,6 +2,9 @@ package command
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -175,6 +178,31 @@ func TestNormalizeAppFillsEveryBoundary(t *testing.T) {
 	}
 	if runner, ok := app.Runner.(ExecRunner); !ok || runner.Grace != defaultTermGrace {
 		t.Fatalf("normalizeApp() Runner = %#v, want ExecRunner with the default grace", app.Runner)
+	}
+}
+
+func TestDefaultAPIClientSendsVersionedUserAgent(t *testing.T) {
+	t.Parallel()
+	agents := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		agents <- request.Header.Get("User-Agent")
+		_, _ = io.WriteString(writer, "sunny")
+	}))
+	defer server.Close()
+
+	app := &App{}
+	normalizeApp(app)
+	// main sets Version after NewDefaultApp has normalized the App.
+	app.Version = "1.2.3"
+	client, err := app.NewAPIClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Weather(t.Context(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-agents; got != "sat-cli/1.2.3" {
+		t.Fatalf("User-Agent = %q, want sat-cli/1.2.3", got)
 	}
 }
 
