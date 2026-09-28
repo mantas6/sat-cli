@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"image/color"
 	"strings"
@@ -11,56 +12,93 @@ import (
 )
 
 func TestRenderMarkdownContainsHeadingText(t *testing.T) {
-	rendered, err := renderMarkdown("# Pager heading\n", 80, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(ansi.Strip(rendered), "Pager heading") {
-		t.Fatalf("renderMarkdown() = %q, want heading text", rendered)
+	t.Parallel()
+	for _, dark := range []bool{true, false} {
+		rendered, err := renderMarkdown("# Pager heading\n", 80, dark)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(ansi.Strip(rendered), "Pager heading") {
+			t.Fatalf("renderMarkdown(dark=%t) = %q, want heading text", dark, rendered)
+		}
 	}
 }
 
-func TestPagerScrollingKeysChangeOffset(t *testing.T) {
-	render := func(string, int, bool) (string, error) {
-		lines := make([]string, 40)
+// numberedLines renders n lines "line 0".."line n-1" regardless of input.
+func numberedLines(n int) markdownRenderFunc {
+	return func(string, int, bool) (string, error) {
+		lines := make([]string, n)
 		for index := range lines {
 			lines[index] = fmt.Sprintf("line %d", index)
 		}
 		return strings.Join(lines, "\n"), nil
 	}
-	model, err := newPagerModel("raw", PageOptions{Size: Size{Width: 40, Height: 8}}, render)
+}
+
+func newTestPager(t *testing.T, opts PageOptions, render markdownRenderFunc) *pagerModel {
+	t.Helper()
+	model, err := newPagerModel("raw markdown", opts, render)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return model
+}
 
-	model.Update(keyMsg("j"))
-	if model.viewport.YOffset() != 1 {
-		t.Fatalf("offset after j = %d, want 1", model.viewport.YOffset())
-	}
-	model.Update(keyMsg("pgdown"))
-	if model.viewport.YOffset() <= 1 {
-		t.Fatalf("offset after pgdown = %d, want greater than 1", model.viewport.YOffset())
-	}
-	model.Update(keyMsg("G"))
-	bottom := model.viewport.YOffset()
-	model.Update(keyMsg("g"))
-	if bottom == 0 || model.viewport.YOffset() != 0 {
-		t.Fatalf("offsets after G and g = (%d, %d), want bottom then zero", bottom, model.viewport.YOffset())
+// resize delivers a WindowSizeMsg and, when the pager schedules a debounced
+// re-render, runs that command and delivers its message too.
+func resize(model *pagerModel, width, height int) {
+	_, command := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	if command != nil {
+		model.Update(command())
 	}
 }
 
-func TestPagerResizeRerendersAtNewWidth(t *testing.T) {
+func TestPagerScrollingKeysChangeOffset(t *testing.T) {
+	t.Parallel()
+	model := newTestPager(t, PageOptions{Size: Size{Width: 40, Height: 8}}, numberedLines(40))
+
+	steps := []struct {
+		key  string
+		want func(offset int) bool
+		desc string
+	}{
+		{"j", func(o int) bool { return o == 1 }, "1"},
+		{"down", func(o int) bool { return o == 2 }, "2"},
+		{"k", func(o int) bool { return o == 1 }, "1"},
+		{"space", func(o int) bool { return o > 1 }, "> 1"},
+		{"g", func(o int) bool { return o == 0 }, "0"},
+		{"pgdown", func(o int) bool { return o == 7 }, "7"},
+		{"b", func(o int) bool { return o == 0 }, "0"},
+		{"d", func(o int) bool { return o == 3 }, "3"},
+		{"u", func(o int) bool { return o == 0 }, "0"},
+		{"G", func(o int) bool { return o == 33 }, "33"},
+		{"home", func(o int) bool { return o == 0 }, "0"},
+		{"end", func(o int) bool { return o == 33 }, "33"},
+	}
+	for _, step := range steps {
+		model.Update(keyMsg(step.key))
+		if offset := model.viewport.YOffset(); !step.want(offset) {
+			t.Fatalf("offset after %q = %d, want %s", step.key, offset, step.desc)
+		}
+	}
+}
+
+func TestPagerResizeRerendersAtNewWidthAfterDebounce(t *testing.T) {
+	t.Parallel()
 	var widths []int
-	render := func(markdown string, width int, _ bool) (string, error) {
+	model := newTestPager(t, PageOptions{Size: Size{Width: 80, Height: 24}}, func(markdown string, width int, _ bool) (string, error) {
 		widths = append(widths, width)
 		return fmt.Sprintf("%s at %d", markdown, width), nil
-	}
-	model, err := newPagerModel("raw markdown", PageOptions{Size: Size{Width: 80, Height: 24}}, render)
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
 
-	model.Update(tea.WindowSizeMsg{Width: 42, Height: 12})
+	_, command := model.Update(tea.WindowSizeMsg{Width: 42, Height: 12})
+	if got := fmt.Sprint(widths); got != "[80]" {
+		t.Fatalf("render widths before debounce = %s, want [80]", got)
+	}
+	if command == nil {
+		t.Fatal("width change did not schedule a re-render")
+	}
+	model.Update(command())
 	if got := fmt.Sprint(widths); got != "[80 42]" {
 		t.Fatalf("render widths = %s, want [80 42]", got)
 	}
@@ -71,43 +109,142 @@ func TestPagerResizeRerendersAtNewWidth(t *testing.T) {
 		t.Fatalf("View() = %q, want resized rendering", model.View().Content)
 	}
 
-	model.Update(tea.WindowSizeMsg{})
+	if _, command := model.Update(tea.WindowSizeMsg{}); command != nil {
+		t.Fatal("zero-sized resize scheduled a re-render")
+	}
+	resize(model, 80, 24)
 	if got := fmt.Sprint(widths); got != "[80 42]" {
-		t.Fatalf("render widths after zero resize = %s, want unchanged", got)
+		t.Fatalf("render widths after returning to 80 = %s, want the cached rendering", got)
+	}
+}
+
+func TestPagerDropsStaleResizeRenders(t *testing.T) {
+	t.Parallel()
+	var widths []int
+	model := newTestPager(t, PageOptions{Size: Size{Width: 80, Height: 24}}, func(_ string, width int, _ bool) (string, error) {
+		widths = append(widths, width)
+		return "content", nil
+	})
+
+	_, first := model.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	_, second := model.Update(tea.WindowSizeMsg{Width: 50, Height: 24})
+	model.Update(first())
+	model.Update(second())
+	if got := fmt.Sprint(widths); got != "[80 50]" {
+		t.Fatalf("render widths = %s, want only the settled width [80 50]", got)
+	}
+}
+
+func TestPagerResizeClampsOffsetWhenTaller(t *testing.T) {
+	t.Parallel()
+	model := newTestPager(t, PageOptions{Size: Size{Width: 40, Height: 11}}, numberedLines(20))
+	model.Update(keyMsg("G"))
+	if got := model.viewport.YOffset(); got != 10 {
+		t.Fatalf("offset at bottom = %d, want 10", got)
+	}
+
+	resize(model, 40, 16)
+	if got := model.viewport.YOffset(); got != 5 {
+		t.Fatalf("offset after growing = %d, want 5 (clamped to the new bottom)", got)
+	}
+	if !model.viewport.AtBottom() {
+		t.Fatal("viewport should still be at the bottom")
+	}
+}
+
+func TestPagerWidthChangeKeepsRelativeScrollPosition(t *testing.T) {
+	t.Parallel()
+	// Narrower widths wrap into proportionally more lines.
+	render := func(_ string, width int, _ bool) (string, error) {
+		return numberedLines(4000/width)("", width, true)
+	}
+	model := newTestPager(t, PageOptions{Size: Size{Width: 40, Height: 11}}, render)
+	// 100 lines, 10 visible: max offset 90.
+	for range 45 {
+		model.Update(keyMsg("j"))
+	}
+
+	resize(model, 20, 11)
+	// 200 lines, max offset 190: half way is 95.
+	if got := model.viewport.YOffset(); got != 95 {
+		t.Fatalf("offset after narrowing = %d, want 95", got)
+	}
+
+	model.Update(keyMsg("g"))
+	resize(model, 40, 11)
+	if got := model.viewport.YOffset(); got != 0 {
+		t.Fatalf("offset after widening from the top = %d, want 0", got)
+	}
+}
+
+func TestPagerFooterShowsKeyHelp(t *testing.T) {
+	t.Parallel()
+	model := newTestPager(t, PageOptions{Title: "Article", Size: Size{Width: 80, Height: 8}}, numberedLines(40))
+
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("View() has %d lines, want 8", len(lines))
+	}
+	if lines[0] != "Article" {
+		t.Fatalf("title line = %q, want Article", lines[0])
+	}
+	footer := lines[len(lines)-1]
+	for _, want := range []string{"0%", "j", "down", "q", "quit"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("footer = %q, want it to mention %q", footer, want)
+		}
+	}
+}
+
+func TestPagerRenderFailureQuitsWithError(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("render failed")
+	model := newTestPager(t, PageOptions{Size: Size{Width: 80, Height: 24}}, func(_ string, width int, _ bool) (string, error) {
+		if width != 80 {
+			return "", wantErr
+		}
+		return "content", nil
+	})
+
+	_, command := model.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	_, command = model.Update(command())
+	if command == nil {
+		t.Fatal("render failure did not quit")
+	}
+	if _, ok := command().(tea.QuitMsg); !ok || !errors.Is(model.renderErr, wantErr) {
+		t.Fatalf("command() = %T, renderErr = %v, want tea.QuitMsg and %v", command(), model.renderErr, wantErr)
 	}
 }
 
 func TestPagerQuitKeys(t *testing.T) {
-	keys := []tea.KeyPressMsg{
-		keyMsg("q"),
-		keyMsg("esc"),
-		keyMsg("ctrl+c"),
-	}
-	for _, message := range keys {
-		t.Run(message.String(), func(t *testing.T) {
-			model, err := newPagerModel("content", PageOptions{}, func(markdown string, _ int, _ bool) (string, error) {
+	t.Parallel()
+	for _, name := range []string{"q", "esc", "ctrl+c"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			model := newTestPager(t, PageOptions{}, func(markdown string, _ int, _ bool) (string, error) {
 				return markdown, nil
 			})
-			if err != nil {
-				t.Fatal(err)
+			_, command := model.Update(keyMsg(name))
+			if command == nil {
+				t.Fatalf("Update(%q) returned no command", name)
 			}
-			_, command := model.Update(message)
-			if command == nil || !model.quitting {
-				t.Fatalf("Update(%q) did not quit", message.String())
+			if _, ok := command().(tea.QuitMsg); !ok || !model.quitting {
+				t.Fatalf("Update(%q) command returned %T, want tea.QuitMsg", name, command())
+			}
+			if model.View().Content != "" {
+				t.Fatalf("View() after quit = %q, want empty", model.View().Content)
 			}
 		})
 	}
 }
 
 func TestPagerRerendersOnlyWhenBackgroundStyleChanges(t *testing.T) {
+	t.Parallel()
 	var styles []bool
-	model, err := newPagerModel("md", PageOptions{Size: Size{Width: 40, Height: 8}}, func(markdown string, _ int, dark bool) (string, error) {
+	model := newTestPager(t, PageOptions{Size: Size{Width: 40, Height: 8}}, func(markdown string, _ int, dark bool) (string, error) {
 		styles = append(styles, dark)
 		return markdown, nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if model.Init() == nil {
 		t.Fatal("Init() = nil, want a background colour request")
 	}
@@ -115,6 +252,7 @@ func TestPagerRerendersOnlyWhenBackgroundStyleChanges(t *testing.T) {
 	model.Update(tea.BackgroundColorMsg{Color: color.Black}) // already dark
 	model.Update(tea.BackgroundColorMsg{Color: color.White})
 	model.Update(tea.BackgroundColorMsg{Color: color.White}) // unchanged
+	model.Update(tea.BackgroundColorMsg{Color: color.Black}) // cached
 	if got := fmt.Sprint(styles); got != "[true false]" {
 		t.Fatalf("render styles = %s, want [true false]", got)
 	}
