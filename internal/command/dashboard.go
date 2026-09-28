@@ -10,12 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	defaultDashboardInterval = 5 * time.Second
-	dashboardRequestTimeout  = 10 * time.Second
-)
+const dashboardRequestTimeout = 10 * time.Second
 
-var errDashboardNeedsTerminal = errors.New("dashboard follow mode requires a terminal on stdout")
+var errDashboardNeedsTerminal = errors.New("dashboard follow mode requires a terminal on stdin and stdout")
 
 func newDashboardCommand(app *App) *cobra.Command {
 	var follow time.Duration
@@ -45,7 +42,8 @@ func newDashboardCommand(app *App) *cobra.Command {
 			if follow <= 0 {
 				return errors.New("dashboard follow interval must be greater than zero")
 			}
-			if !app.IsTTY(app.Stdout) {
+			// The dashboard reads its quit keys from stdin.
+			if !app.interactive() {
 				return errDashboardNeedsTerminal
 			}
 
@@ -65,8 +63,8 @@ func newDashboardCommand(app *App) *cobra.Command {
 			return app.Follow(cmd.Context(), app.Stdin, app.Stdout, fetch, opts)
 		},
 	}
-	command.Flags().DurationVarP(&follow, "follow", "f", 0, "refresh continuously (default interval 5s)")
-	command.Flags().Lookup("follow").NoOptDefVal = defaultDashboardInterval.String()
+	command.Flags().DurationVarP(&follow, "follow", "f", 0, "refresh continuously (default interval "+ui.DefaultDashboardInterval.String()+")")
+	command.Flags().Lookup("follow").NoOptDefVal = ui.DefaultDashboardInterval.String()
 	return command
 }
 

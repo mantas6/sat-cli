@@ -118,10 +118,26 @@ func TestDashboardFollowRejectsInvalidIntervals(t *testing.T) {
 
 func TestDashboardFollowRequiresTerminal(t *testing.T) {
 	t.Parallel()
-	// newTestApp streams are not terminals and Follow fails the test if run.
-	app, _, _ := newTestApp(t)
+	tests := []struct {
+		name     string
+		terminal func(app *App) any
+	}{
+		// newTestApp streams are not terminals and Follow fails the test if run.
+		{name: "neither", terminal: func(*App) any { return nil }},
+		{name: "stdout only", terminal: func(app *App) any { return app.Stdout }},
+		{name: "stdin only", terminal: func(app *App) any { return app.Stdin }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			app, _, _ := newTestApp(t)
+			terminal := test.terminal(app)
+			app.IsTTY = func(stream any) bool { return terminal != nil && stream == terminal }
 
-	if err := run(t, app, "dashboard", "--follow"); !errors.Is(err, errDashboardNeedsTerminal) {
-		t.Fatalf("Execute() error = %v, want terminal requirement", err)
+			err := run(t, app, "dashboard", "--follow")
+			if !errors.Is(err, errDashboardNeedsTerminal) {
+				t.Fatalf("Execute() error = %v, want terminal requirement", err)
+			}
+		})
 	}
 }
