@@ -103,7 +103,7 @@ func TestSSHCommandDefaultsRemoteRoot(t *testing.T) {
 	if err := executeRunTestCommand(app, "run", "about"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-o", "LogLevel=QUIET", "example.com", `cd "$HOME"/Sat/current && php artisan 'about'`}
+	want := []string{"-o", "LogLevel=ERROR", "example.com", `cd "$HOME"/Sat/current && php artisan 'about'`}
 	if !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("Run() args = %#v, want %#v", runner.args, want)
 	}
@@ -121,7 +121,7 @@ func TestSSHCommandUsesUserPrefixAndQuotesArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"-o", "LogLevel=QUIET", "deploy@server",
+		"-o", "LogLevel=ERROR", "deploy@server",
 		"cd '/srv/sat release/current' && php artisan 'task' 'two words' 'it'\\''s' '$HOME'",
 	}
 	if runner.name != sshBinary || !reflect.DeepEqual(runner.args, want) {

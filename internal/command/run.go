@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var sshBinary = "ssh"
+const sshBinary = "ssh"
 
 // defaultRemoteDir is the release directory used when REMOTE_ROOT is unset.
 // $HOME is left outside single quotes so the remote login shell expands it.
@@ -68,7 +68,9 @@ func newRunCommand(app *App) *cobra.Command {
 				remoteCommand += " " + shellJoin(args)
 			}
 
-			sshArgs := []string{"-o", "LogLevel=QUIET"}
+			// ERROR keeps connection and authentication failures visible while
+			// hiding banners and warnings.
+			sshArgs := []string{"-o", "LogLevel=ERROR"}
 			stdin, stdinOK := app.Stdin.(*os.File)
 			stdout, stdoutOK := app.Stdout.(*os.File)
 			if stdinOK && stdoutOK && app.IsTerminal(int(stdin.Fd())) && app.IsTerminal(int(stdout.Fd())) {

@@ -528,7 +528,9 @@ func assertJSONBody(t *testing.T, request *http.Request, want map[string]string)
 	}
 	var got map[string]string
 	if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
-		t.Fatal(err)
+		// Called from the server's handler goroutine, where t.Fatal is not allowed.
+		t.Errorf("decode JSON body: %v", err)
+		return
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("JSON body = %#v, want %#v", got, want)

@@ -82,7 +82,8 @@ func TestAuthStatusEnvOverride(t *testing.T) {
 	if err := os.WriteFile(urlFile, []byte("https://override.example\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(tokenFile, []byte("secret\n"), 0o600); err != nil {
+	const tokenValue = "tok-7f3e9c1d-never-print"
+	if err := os.WriteFile(tokenFile, []byte(tokenValue+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +110,7 @@ func TestAuthStatusEnvOverride(t *testing.T) {
 	if !strings.Contains(out, "Token:           configured") {
 		t.Fatalf("expected configured token:\n%s", out)
 	}
-	if strings.Contains(out, "secret") && !strings.Contains(out, "custom-token") {
+	if strings.Contains(out, tokenValue) {
 		t.Fatalf("token value leaked into output:\n%s", out)
 	}
 }

@@ -21,10 +21,9 @@ const (
 	newArticleItemID = "new"
 )
 
-var (
-	executablePath = os.Executable
-	editorBinary   = "nvim"
-)
+const editorBinary = "nvim"
+
+var executablePath = os.Executable
 
 func newArticleEditCommand(app *App) *cobra.Command {
 	var id string
