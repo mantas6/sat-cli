@@ -30,7 +30,7 @@ func newWorkspace(t *testing.T, contents, id string) string {
 func TestSaveArticleRequiresContents(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newTestApp(t)
-	_, err := saveArticle(t.Context(), app, &fakeAPI{}, t.TempDir())
+	err := saveArticle(t.Context(), app, &fakeAPI{}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "contents.md") {
 		t.Fatalf("saveArticle() error = %v, want missing contents.md error", err)
 	}
@@ -52,7 +52,7 @@ func TestSaveArticleCreateThenUpdateLifecycle(t *testing.T) {
 	app, stdout, _ := newTestApp(t, withConfig(cfg))
 	workDir := newWorkspace(t, "one two three", "")
 
-	if _, err := saveArticle(t.Context(), app, client, workDir); err != nil {
+	if err := saveArticle(t.Context(), app, client, workDir); err != nil {
 		t.Fatal(err)
 	}
 	if createdContents != "one two three" {
@@ -82,7 +82,7 @@ func TestSaveArticleCreateThenUpdateLifecycle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workDir, "contents.md"), []byte("updated article contents"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := saveArticle(t.Context(), app, client, workDir); err != nil {
+	if err := saveArticle(t.Context(), app, client, workDir); err != nil {
 		t.Fatal(err)
 	}
 	if updatedID != 42 || updatedContents != "updated article contents" {
@@ -102,7 +102,7 @@ func TestSaveArticleRejectsInvalidWorkspaceID(t *testing.T) {
 	app, _, _ := newTestApp(t)
 	workDir := newWorkspace(t, "text", "..\n")
 
-	_, err := saveArticle(t.Context(), app, client, workDir)
+	err := saveArticle(t.Context(), app, client, workDir)
 	if err == nil || !strings.Contains(err.Error(), "invalid article ID") {
 		t.Fatalf("saveArticle() error = %v, want invalid article ID", err)
 	}
@@ -119,7 +119,7 @@ func TestSaveArticleFailureKeepsIDAndCacheButCreatesBackup(t *testing.T) {
 	app, stdout, _ := newTestApp(t, withConfig(cfg))
 	workDir := newWorkspace(t, "changed", "9\n")
 
-	_, err := saveArticle(t.Context(), app, client, workDir)
+	err := saveArticle(t.Context(), app, client, workDir)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("saveArticle() error = %v, want %v", err, wantErr)
 	}

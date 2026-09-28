@@ -203,6 +203,94 @@ func TestArticleEditorPreservesExitCode(t *testing.T) {
 	}
 }
 
+// editorExit returns the *exec.ExitError of a process that exited with code.
+func editorExit(t *testing.T, code string) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", "exit "+code).Run()
+	var processErr *exec.ExitError
+	if !errors.As(err, &processErr) {
+		t.Fatalf("test setup error = %v, want *exec.ExitError", err)
+	}
+	return err
+}
+
+func TestArticleNewSavedAssignsJournalWhenEditorExitsNonZero(t *testing.T) {
+	t.Parallel()
+	execErr := editorExit(t, "2")
+	var gotID int
+	var gotJournal string
+	client := &fakeAPI{listJournals: func(context.Context) ([]api.Journal, error) {
+		return []api.Journal{{ID: 1, Title: "Daily"}}, nil
+	}, assignArticleJournal: func(_ context.Context, id int, journal string) (api.Article, error) {
+		gotID, gotJournal = id, journal
+		return api.Article{}, nil
+	}}
+	// The save hook stored the article, then the user quit with :cq.
+	save := saveFromEditor("saved then :cq", "55\n")
+	runner := &fakeRunner{run: func(name string, args []string) error {
+		if err := save(name, args); err != nil {
+			return err
+		}
+		return execErr
+	}}
+	app, _, stderr := newTestApp(t, withAPI(client), withRunner(runner), withTTY())
+	app.Select = selectIndex(0, nil, nil)
+
+	err := run(t, app, "article", "new")
+	if gotID != 55 || gotJournal != "Daily" {
+		t.Fatalf("AssignArticleJournal() = (%d, %q), want (55, Daily) despite the editor exit", gotID, gotJournal)
+	}
+	var exitErr ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 || !errors.Is(err, execErr) {
+		t.Fatalf("Execute() error = %#v, want the editor's ExitError code 2", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want nothing", stderr.String())
+	}
+}
+
+func TestArticleNewEditorExitWithoutSaveReportsNothingSaved(t *testing.T) {
+	t.Parallel()
+	execErr := editorExit(t, "1")
+	client := &fakeAPI{assignArticleJournal: func(context.Context, int, string) (api.Article, error) {
+		t.Error("AssignArticleJournal() called without a save")
+		return api.Article{}, nil
+	}}
+	app, _, stderr := newTestApp(t, withAPI(client), withRunner(&fakeRunner{err: execErr}))
+
+	err := run(t, app, "article", "new")
+	var exitErr ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
+		t.Fatalf("Execute() error = %#v, want ExitError code 1", err)
+	}
+	if stderr.String() != "Nothing saved.\n" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestArticleNewCancelledEditorDoesNotAssign(t *testing.T) {
+	t.Parallel()
+	client := &fakeAPI{assignArticleJournal: func(context.Context, int, string) (api.Article, error) {
+		t.Error("AssignArticleJournal() called after cancellation")
+		return api.Article{}, nil
+	}}
+	save := saveFromEditor("saved", "3\n")
+	runner := &fakeRunner{run: func(name string, args []string) error {
+		if err := save(name, args); err != nil {
+			return err
+		}
+		return context.Canceled
+	}}
+	app, _, stderr := newTestApp(t, withAPI(client), withRunner(runner))
+
+	if err := run(t, app, "article", "new"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Execute() error = %v, want context.Canceled", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want nothing", stderr.String())
+	}
+}
+
 func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
 	t.Parallel()
 	var gotID int

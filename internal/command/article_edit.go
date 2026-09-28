@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +96,7 @@ func editArticle(ctx context.Context, app *App, client APIClient, id int, isNew 
 		return fmt.Errorf("create article workspace: %w", err)
 	}
 	contentsPath := filepath.Join(workDir, "contents.md")
+	idPath := filepath.Join(workDir, "id")
 	if !isNew {
 		article, err := client.GetArticle(ctx, id)
 		if err != nil {
@@ -105,8 +105,8 @@ func editArticle(ctx context.Context, app *App, client APIClient, id int, isNew 
 		if err := os.WriteFile(contentsPath, []byte(article.Contents), 0o600); err != nil {
 			return fmt.Errorf("write article contents: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(workDir, "id"), []byte(strconv.Itoa(id)+"\n"), 0o600); err != nil {
-			return fmt.Errorf("write article ID: %w", err)
+		if err := writeArticleID(idPath, id); err != nil {
+			return err
 		}
 	}
 
@@ -115,30 +115,35 @@ func editArticle(ctx context.Context, app *App, client APIClient, id int, isNew 
 		return fmt.Errorf("resolve sat executable: %w", err)
 	}
 	args := []string{"-c", editorCommand(executable, workDir), contentsPath}
-	if err := app.Runner.Run(ctx, editorBinary, args, app.Stdin, app.Stdout, app.Stderr); err != nil {
-		return childExitError(err)
+	editErr := childExitError(app.Runner.Run(ctx, editorBinary, args, app.Stdin, app.Stdout, app.Stderr))
+	var exitErr ExitError
+	if !isNew || (editErr != nil && !errors.As(editErr, &exitErr)) {
+		// Existing articles are saved by the hook alone; a start failure or
+		// cancellation leaves nothing to assign.
+		return editErr
 	}
 
-	if !isNew {
-		return nil
+	// The save hook writes the ID file only after creating the article, so a
+	// new article may have been saved even when the editor exited non-zero.
+	// Assign it anyway and keep the editor's exit code.
+	idBytes, err := os.ReadFile(idPath)
+	if errors.Is(err, os.ErrNotExist) {
+		if _, err := fmt.Fprintln(app.Stderr, "Nothing saved."); err != nil {
+			return err
+		}
+		return editErr
 	}
-	contentsInfo, contentsErr := os.Stat(contentsPath)
-	idBytes, idErr := os.ReadFile(filepath.Join(workDir, "id"))
-	if contentsErr != nil && !errors.Is(contentsErr, os.ErrNotExist) {
-		return fmt.Errorf("inspect article contents: %w", contentsErr)
-	}
-	if idErr != nil && !errors.Is(idErr, os.ErrNotExist) {
-		return fmt.Errorf("read article ID: %w", idErr)
-	}
-	if errors.Is(contentsErr, os.ErrNotExist) || contentsInfo.IsDir() || errors.Is(idErr, os.ErrNotExist) || strings.TrimSpace(string(idBytes)) == "" {
-		_, err := fmt.Fprintln(app.Stderr, "Nothing saved.")
-		return err
+	if err != nil {
+		return fmt.Errorf("read article ID: %w", err)
 	}
 	savedID, err := parseArticleID(string(idBytes))
 	if err != nil {
 		return err
 	}
-	return assignArticle(ctx, app, client, savedID, "")
+	if err := assignArticle(ctx, app, client, savedID, ""); err != nil {
+		return err
+	}
+	return editErr
 }
 
 func assignArticle(ctx context.Context, app *App, client APIClient, id int, journal string) error {
