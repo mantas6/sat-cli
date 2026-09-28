@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
 	"github.com/mantas6/sat-cli/internal/command"
+	"github.com/mantas6/sat-cli/internal/ui"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -31,8 +33,25 @@ func main() {
 }
 
 func exit(err error) {
-	fmt.Fprintf(os.Stderr, "sat: %v\n", err)
+	if !silent(err) {
+		fmt.Fprintf(os.Stderr, "sat: %v\n", err)
+	}
 	os.Exit(exitCode(err))
+}
+
+// silent reports whether err only carries an exit code: the failure was
+// already reported by a child process (editor, ssh), the user cancelled a
+// picker, or there is no underlying error at all.
+func silent(err error) bool {
+	var exitErr command.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	if exitErr.Err == nil {
+		return true
+	}
+	var processErr *exec.ExitError
+	return errors.As(exitErr.Err, &processErr) || errors.Is(exitErr.Err, ui.ErrCancelled)
 }
 
 func exitCode(err error) int {
@@ -40,13 +59,9 @@ func exitCode(err error) int {
 		return 130
 	}
 
-	var pointer *command.ExitError
-	if errors.As(err, &pointer) && pointer.Code != 0 {
-		return pointer.Code
-	}
-	var value command.ExitError
-	if errors.As(err, &value) && value.Code != 0 {
-		return value.Code
+	var exitErr command.ExitError
+	if errors.As(err, &exitErr) && exitErr.Code != 0 {
+		return exitErr.Code
 	}
 
 	return 1
