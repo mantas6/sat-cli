@@ -103,6 +103,22 @@ func TestMusicSyncWritesTrackCache(t *testing.T) {
 	}
 }
 
+func TestMusicSyncKeepsEachTrackOnOneCacheLine(t *testing.T) {
+	client := &musicAPI{stubAPI: &stubAPI{}, saved: func(context.Context) ([]string, error) {
+		return []string{"id-1\tArtist\t/Album\t/01.\tTwo\nlines\r\nhere\r"}, nil
+	}}
+	store := &cacheConfig{stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"}}
+	app, _, _ := newMusicTestApp(client, store)
+
+	if err := executeMusicTestCommand(app, "music", "sync"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"id-1\tArtist\t/Album\t/01.\tTwo lines here "}
+	if !reflect.DeepEqual(store.written, want) {
+		t.Fatalf("cache write = %#v, want %#v", store.written, want)
+	}
+}
+
 func TestMusicPlayWithIDSkipsSelectionAndCache(t *testing.T) {
 	var gotID string
 	client := &musicAPI{stubAPI: &stubAPI{}, play: func(_ context.Context, id string) error {

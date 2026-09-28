@@ -51,6 +51,9 @@ func newMusicSyncCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			for index, line := range lines {
+				lines[index] = cacheLineReplacer.Replace(line)
+			}
 			if err := app.Config.WriteCacheLines("tracks", lines); err != nil {
 				return err
 			}

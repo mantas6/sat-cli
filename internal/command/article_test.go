@@ -48,6 +48,24 @@ func TestArticleLineFormatsLegacyCacheLine(t *testing.T) {
 	}
 }
 
+func TestArticleLineNeutralisesSeparatorsInFields(t *testing.T) {
+	article := api.Article{
+		ID:        7,
+		Title:     "Tabs\tand\nnew\r\nlines\r",
+		WordCount: 1,
+		CreatedAt: "today\n",
+		Journal:   &api.Journal{Title: "Work\tLog"},
+	}
+	line := articleLine(article)
+	if got, want := line, "7\tTabs and new lines \t1w\ttoday \tWork Log"; got != want {
+		t.Fatalf("articleLine() = %q, want %q", got, want)
+	}
+	items := parseArticleLines([]string{line})
+	if len(items) != 1 || items[0].ID != "7" || len(items[0].Columns) != 4 {
+		t.Fatalf("parseArticleLines(articleLine()) = %#v, want one item with 4 columns", items)
+	}
+}
+
 func TestParseArticleLinesToleratesLegacyShortLines(t *testing.T) {
 	got := parseArticleLines([]string{
 		"",

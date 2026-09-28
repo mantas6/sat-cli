@@ -59,12 +59,26 @@ func newArlCommand(app *App) *cobra.Command {
 	return command
 }
 
+// cacheFieldReplacer neutralises the separators of the tab-delimited,
+// newline-terminated cache format inside a single field.
+var cacheFieldReplacer = strings.NewReplacer("\r\n", " ", "\t", " ", "\n", " ", "\r", " ")
+
+// cacheLineReplacer neutralises line breaks inside an already tab-delimited
+// cache line so it stays one record.
+var cacheLineReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
 func articleLine(article api.Article) string {
 	journalTitle := ""
 	if article.Journal != nil {
 		journalTitle = article.Journal.Title
 	}
-	return fmt.Sprintf("%d\t%s\t%dw\t%s\t%s", article.ID, article.Title, article.WordCount, article.CreatedAt, journalTitle)
+	return fmt.Sprintf("%d\t%s\t%dw\t%s\t%s",
+		article.ID,
+		cacheFieldReplacer.Replace(article.Title),
+		article.WordCount,
+		cacheFieldReplacer.Replace(article.CreatedAt),
+		cacheFieldReplacer.Replace(journalTitle),
+	)
 }
 
 func parseArticleLines(lines []string) []ui.Item {
