@@ -68,21 +68,44 @@ func TestSSHTargetDerivedFromURL(t *testing.T) {
 			if target.Host != test.wantHost {
 				t.Fatalf("Host = %q, want %q", target.Host, test.wantHost)
 			}
-			if target.Root != "/home/mantas/"+strings.TrimPrefix(test.baseURL, "https://")+"/current" {
-				t.Fatalf("Root = %q", target.Root)
+			if got := target.remoteDir(); got != `"$HOME"/Sat/current` {
+				t.Fatalf("remoteDir() = %q, want $HOME/Sat/current expression", got)
 			}
 		})
 	}
 }
 
-func TestSSHRemoteRootDefaultsFromFullURLHost(t *testing.T) {
+func TestSSHRemoteRootDefaultsToHomeSatCurrent(t *testing.T) {
 	env := map[string]string{"REMOTE_HOST": "configured-alias"}
-	target, err := resolveSSHTarget(func(key string) string { return env[key] }, "https://sat.example.com:8443/path")
+	target, err := resolveSSHTarget(func(key string) string { return env[key] }, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target.Root != "/home/mantas/sat.example.com/current" {
-		t.Fatalf("Root = %q, want default based on full hostname", target.Root)
+	if target.Host != "configured-alias" || target.Root != "" {
+		t.Fatalf("resolveSSHTarget() = %#v, want configured host and default root", target)
+	}
+	if got := target.remoteDir(); got != `"$HOME"/Sat/current` {
+		t.Fatalf("remoteDir() = %q, want $HOME/Sat/current expression", got)
+	}
+}
+
+func TestSSHRemoteRootFromEnvironmentStaysQuotedVerbatim(t *testing.T) {
+	target := sshTarget{Host: "server", Root: `/srv/it's "sat" $HOME`}
+	if got, want := target.remoteDir(), `'/srv/it'\''s "sat" $HOME'`; got != want {
+		t.Fatalf("remoteDir() = %q, want %q", got, want)
+	}
+}
+
+func TestSSHCommandDefaultsRemoteRoot(t *testing.T) {
+	runner := &recordingSSHRunner{}
+	app := newSSHTestApp(runner, nil)
+
+	if err := executeRunTestCommand(app, "run", "about"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-o", "LogLevel=QUIET", "example.com", `cd "$HOME"/Sat/current && php artisan 'about'`}
+	if !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("Run() args = %#v, want %#v", runner.args, want)
 	}
 }
 
@@ -283,16 +306,16 @@ func TestSSHCommandHelpDoesNotRunSSH(t *testing.T) {
 	}
 }
 
-func TestSSHCommandSkipsFailingBaseURLWhenTargetIsConfigured(t *testing.T) {
+func TestSSHCommandSkipsFailingBaseURLWhenHostIsConfigured(t *testing.T) {
 	runner := &recordingSSHRunner{}
-	app := newSSHTestApp(runner, map[string]string{
-		"REMOTE_HOST": "server",
-		"REMOTE_ROOT": "/srv/current",
-	})
+	app := newSSHTestApp(runner, map[string]string{"REMOTE_HOST": "server"})
 	app.Config = &stubConfig{baseErr: errors.New("base URL unavailable")}
 
 	if err := executeRunTestCommand(app, "run"); err != nil {
 		t.Fatal(err)
+	}
+	if got := runner.args[len(runner.args)-1]; got != `cd "$HOME"/Sat/current && php artisan` {
+		t.Fatalf("remote command = %q", got)
 	}
 }
 

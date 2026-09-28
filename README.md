@@ -55,9 +55,9 @@ state files from the shell scripts (`url`, `token`, `list`, `tracks`,
 and `REMOTE_ROOT`.
 
 `sat run` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
-to a host and release directory derived from the base URL. It forwards
-SIGINT/SIGTERM to the remote ssh session and exits with `128+signal` when the
-session is terminated by a signal.
+to a host derived from the base URL and `$HOME/Sat/current` on the remote. It
+forwards SIGINT/SIGTERM to the remote ssh session and exits with `128+signal`
+when the session is terminated by a signal.
 
 ## Development
 

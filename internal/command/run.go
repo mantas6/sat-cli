@@ -14,10 +14,24 @@ import (
 
 var sshBinary = "ssh"
 
+// defaultRemoteDir is the release directory used when REMOTE_ROOT is unset.
+// $HOME is left outside single quotes so the remote login shell expands it.
+const defaultRemoteDir = `"$HOME"/Sat/current`
+
 type sshTarget struct {
 	Host string
 	User string
+	// Root is the remote release directory; empty selects defaultRemoteDir.
 	Root string
+}
+
+// remoteDir returns the shell expression for the remote release directory. A
+// user-supplied root is quoted verbatim; the default expands $HOME remotely.
+func (t sshTarget) remoteDir() string {
+	if t.Root == "" {
+		return defaultRemoteDir
+	}
+	return shellQuote(t.Root)
 }
 
 func init() {
@@ -35,10 +49,8 @@ func newRunCommand(app *App) *cobra.Command {
 				return command.Help()
 			}
 
-			host := app.Getenv("REMOTE_HOST")
-			root := app.Getenv("REMOTE_ROOT")
 			var baseURL string
-			if host == "" || root == "" {
+			if app.Getenv("REMOTE_HOST") == "" {
 				var err error
 				baseURL, err = app.Config.BaseURL()
 				if err != nil {
@@ -51,7 +63,7 @@ func newRunCommand(app *App) *cobra.Command {
 				return err
 			}
 
-			remoteCommand := "cd " + shellQuote(target.Root) + " && php artisan"
+			remoteCommand := "cd " + target.remoteDir() + " && php artisan"
 			if len(args) > 0 {
 				remoteCommand += " " + shellJoin(args)
 			}
@@ -98,7 +110,7 @@ func resolveSSHTarget(getenv func(string) string, baseURL string) (sshTarget, er
 		User: getenv("REMOTE_USER"),
 		Root: getenv("REMOTE_ROOT"),
 	}
-	if target.Host != "" && target.Root != "" {
+	if target.Host != "" {
 		return target, nil
 	}
 
@@ -111,15 +123,10 @@ func resolveSSHTarget(getenv func(string) string, baseURL string) (sshTarget, er
 		return sshTarget{}, fmt.Errorf("base URL %q has no host", baseURL)
 	}
 
-	if target.Host == "" {
-		target.Host = baseHost
-		labels := strings.Split(baseHost, ".")
-		if len(labels) >= 3 && net.ParseIP(baseHost) == nil {
-			target.Host = strings.Join(labels[1:], ".")
-		}
-	}
-	if target.Root == "" {
-		target.Root = "/home/mantas/" + baseHost + "/current"
+	target.Host = baseHost
+	labels := strings.Split(baseHost, ".")
+	if len(labels) >= 3 && net.ParseIP(baseHost) == nil {
+		target.Host = strings.Join(labels[1:], ".")
 	}
 
 	return target, nil
