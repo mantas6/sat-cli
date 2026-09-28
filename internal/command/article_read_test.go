@@ -107,7 +107,7 @@ func TestArticleReadInvokesPagerForTerminal(t *testing.T) {
 	if gotContent != "# Markdown" {
 		t.Fatalf("pager content = %q, want raw Markdown", gotContent)
 	}
-	if gotOptions != (ui.PageOptions{Title: "Article", Width: 100, Height: 35}) {
+	if gotOptions != (ui.PageOptions{Title: "Article", Size: ui.Size{Width: 100, Height: 35}}) {
 		t.Fatalf("pager options = %#v", gotOptions)
 	}
 	if gotOut != app.Stdout || stdout.Len() != 0 {

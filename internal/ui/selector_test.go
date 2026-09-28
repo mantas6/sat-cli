@@ -52,7 +52,7 @@ func TestSelectorNavigationWrapsAndPagesAreBounded(t *testing.T) {
 	for index := range items {
 		items[index] = Item{ID: string(rune('a' + index)), Columns: []string{string(rune('A' + index))}}
 	}
-	model := newSelectorModel(items, SelectOptions{Height: 6})
+	model := newSelectorModel(items, SelectOptions{Size: Size{Height: 6}})
 
 	model.Update(keyMsg("down"))
 	if model.cursor != 7 {
@@ -123,7 +123,7 @@ func TestSelectorEmptyStateView(t *testing.T) {
 }
 
 func TestSelectorResizeChangesWidth(t *testing.T) {
-	model := newSelectorModel([]Item{{ID: "one", Columns: []string{"A very long column value"}}}, SelectOptions{Width: 80})
+	model := newSelectorModel([]Item{{ID: "one", Columns: []string{"A very long column value"}}}, SelectOptions{Size: Size{Width: 80}})
 	model.Update(tea.WindowSizeMsg{Width: 12, Height: 8})
 
 	if model.width != 12 || model.input.Width() != 10 {

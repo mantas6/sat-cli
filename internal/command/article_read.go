@@ -53,12 +53,12 @@ func newArticleReadCommand(app *App) *cobra.Command {
 				return writeLine(app.Stdout, article.Contents)
 			}
 
-			// An unknown size stays zero and the pager falls back to 80x24.
+			// An unknown size stays zero and the pager falls back to the
+			// size of Stdout, then 80x24.
 			width, height, _ := app.TermSize()
 			return app.Page(cmd.Context(), app.Stdin, app.Stdout, article.Contents, ui.PageOptions{
-				Title:  "Article",
-				Width:  width,
-				Height: height,
+				Title: "Article",
+				Size:  ui.Size{Width: width, Height: height},
 			})
 		},
 	}

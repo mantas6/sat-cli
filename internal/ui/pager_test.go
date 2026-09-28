@@ -28,7 +28,7 @@ func TestPagerScrollingKeysChangeOffset(t *testing.T) {
 		}
 		return strings.Join(lines, "\n"), nil
 	}
-	model, err := newPagerModel("raw", PageOptions{Width: 40, Height: 8}, render)
+	model, err := newPagerModel("raw", PageOptions{Size: Size{Width: 40, Height: 8}}, render)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestPagerResizeRerendersAtNewWidth(t *testing.T) {
 		widths = append(widths, width)
 		return fmt.Sprintf("%s at %d", markdown, width), nil
 	}
-	model, err := newPagerModel("raw markdown", PageOptions{Width: 80, Height: 24}, render)
+	model, err := newPagerModel("raw markdown", PageOptions{Size: Size{Width: 80, Height: 24}}, render)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestPagerQuitKeys(t *testing.T) {
 
 func TestPagerRerendersOnlyWhenBackgroundStyleChanges(t *testing.T) {
 	var styles []bool
-	model, err := newPagerModel("md", PageOptions{Width: 40, Height: 8}, func(markdown string, _ int, dark bool) (string, error) {
+	model, err := newPagerModel("md", PageOptions{Size: Size{Width: 40, Height: 8}}, func(markdown string, _ int, dark bool) (string, error) {
 		styles = append(styles, dark)
 		return markdown, nil
 	})

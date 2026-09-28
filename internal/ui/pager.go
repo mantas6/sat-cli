@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -13,8 +14,8 @@ import (
 
 // PageOptions configures the initial pager dimensions and title.
 type PageOptions struct {
-	Title         string
-	Width, Height int
+	Size
+	Title string
 }
 
 // renderMarkdown converts Markdown to styled terminal text at the given width
@@ -22,7 +23,7 @@ type PageOptions struct {
 // glamour never queries the terminal while bubbletea owns it.
 func renderMarkdown(markdown string, width int, dark bool) (string, error) {
 	if width <= 0 {
-		width = 80
+		width = defaultWidth
 	}
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle(glamourStyle(dark)),
@@ -43,17 +44,15 @@ func glamourStyle(dark bool) string {
 
 // Page shows Markdown in a scrollable full-screen viewport.
 func Page(ctx context.Context, in io.Reader, out io.Writer, content string, opts PageOptions) error {
+	opts.Size = initialSize(opts.Size, out)
 	model, err := newPagerModel(content, opts, renderMarkdown)
 	if err != nil {
 		return err
 	}
-	program := tea.NewProgram(
-		model,
-		tea.WithInput(in),
-		tea.WithOutput(out),
-		tea.WithContext(ctx),
-	)
-	final, err := program.Run()
+	final, err := runProgram(ctx, model, in, out)
+	if errors.Is(err, errInterrupted) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -78,14 +77,8 @@ type pagerModel struct {
 }
 
 func newPagerModel(markdown string, opts PageOptions, render markdownRenderFunc) (*pagerModel, error) {
-	width := opts.Width
-	if width <= 0 {
-		width = 80
-	}
-	height := opts.Height
-	if height <= 0 {
-		height = 24
-	}
+	size := opts.orDefault()
+	width, height := size.Width, size.Height
 	if render == nil {
 		render = renderMarkdown
 	}

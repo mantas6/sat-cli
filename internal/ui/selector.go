@@ -25,10 +25,9 @@ type Item struct {
 
 // SelectOptions configures a selector.
 type SelectOptions struct {
-	Title  string
-	Query  string
-	Width  int
-	Height int
+	Size
+	Title string
+	Query string
 }
 
 // ErrCancelled indicates that the user closed a selector without choosing.
@@ -44,9 +43,11 @@ func Select(ctx context.Context, in io.Reader, out io.Writer, items []Item, opts
 		return item, err
 	}
 
-	model := newSelectorModel(items, opts)
-	program := tea.NewProgram(model, tea.WithInput(in), tea.WithOutput(out), tea.WithContext(ctx))
-	final, err := program.Run()
+	opts.Size = initialSize(opts.Size, out)
+	final, err := runProgram(ctx, newSelectorModel(items, opts), in, out)
+	if errors.Is(err, errInterrupted) {
+		return Item{}, ErrCancelled
+	}
 	if err != nil {
 		return Item{}, err
 	}
@@ -130,14 +131,8 @@ func newSelectorModel(items []Item, opts SelectOptions) *selectorModel {
 	input.CursorEnd()
 	input.Focus()
 
-	width := opts.Width
-	if width <= 0 {
-		width = 80
-	}
-	height := opts.Height
-	if height <= 0 {
-		height = 24
-	}
+	size := opts.orDefault()
+	width, height := size.Width, size.Height
 	input.SetWidth(max(1, width-2))
 
 	return &selectorModel{
@@ -230,7 +225,7 @@ func (m *selectorModel) render() string {
 	}
 
 	if m.title != "" {
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.title))
+		lines = append(lines, titleStyle.Render(m.title))
 	}
 	lines = append(lines, m.input.View())
 	return strings.Join(lines, "\n") + "\n"

@@ -8,19 +8,13 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-)
-
-const (
-	defaultDashboardWidth  = 80
-	defaultDashboardHeight = 24
 )
 
 // DashboardOptions configures the dashboard refresh interval and initial size.
 type DashboardOptions struct {
-	Interval      time.Duration
-	Width, Height int
+	Size
+	Interval time.Duration
 }
 
 // Fetcher returns the latest dashboard text.
@@ -29,16 +23,10 @@ type Fetcher func(ctx context.Context) (string, error)
 // Follow runs the full-screen dashboard until the user quits or ctx is
 // cancelled.
 func Follow(ctx context.Context, in io.Reader, out io.Writer, fetch Fetcher, opts DashboardOptions) error {
-	model := newDashboardModel(ctx, fetch, opts)
-	program := tea.NewProgram(
-		model,
-		tea.WithInput(in),
-		tea.WithOutput(out),
-		tea.WithContext(ctx),
-	)
-	_, err := program.Run()
-	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
-		return ctx.Err()
+	opts.Size = initialSize(opts.Size, out)
+	_, err := runProgram(ctx, newDashboardModel(ctx, fetch, opts), in, out)
+	if errors.Is(err, errInterrupted) {
+		return nil
 	}
 	return err
 }
@@ -62,21 +50,14 @@ type dashboardModel struct {
 }
 
 func newDashboardModel(ctx context.Context, fetch Fetcher, opts DashboardOptions) *dashboardModel {
-	width := opts.Width
-	if width <= 0 {
-		width = defaultDashboardWidth
-	}
-	height := opts.Height
-	if height <= 0 {
-		height = defaultDashboardHeight
-	}
+	size := opts.orDefault()
 
 	return &dashboardModel{
 		ctx:      ctx,
 		fetch:    fetch,
 		interval: opts.Interval,
-		width:    width,
-		height:   height,
+		width:    size.Width,
+		height:   size.Height,
 		tick: func(interval time.Duration) tea.Cmd {
 			return tea.Tick(interval, func(time.Time) tea.Msg {
 				return dashboardTickMsg{}
@@ -135,10 +116,7 @@ func (m *dashboardModel) render() string {
 		lines = lines[:lineLimit]
 	}
 	if m.hasError && m.height > 0 {
-		badge := lipgloss.NewStyle().
-			Background(lipgloss.Color("1")).
-			Foreground(lipgloss.Color("15")).
-			Render(" <!> ")
+		badge := errorBadgeStyle.Render(" <!> ")
 		lines = append(lines, ansi.Truncate(badge+" Dashboard refresh failed; retrying.", m.width, ""))
 	}
 	return strings.Join(lines, "\n")

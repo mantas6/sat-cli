@@ -86,7 +86,7 @@ func TestDashboardModelKeepsContentAcrossFailureAndClearsBadgeOnRecovery(t *test
 func TestDashboardModelTruncatesWidthAndHeight(t *testing.T) {
 	model := newDashboardModel(context.Background(), func(context.Context) (string, error) {
 		return "", nil
-	}, DashboardOptions{Interval: time.Second, Width: 5, Height: 2})
+	}, DashboardOptions{Interval: time.Second, Size: Size{Width: 5, Height: 2}})
 	model.tick = noDashboardTick
 	model.Update(fetchResultMsg{Text: "123456789\nabcdef\nthird"})
 
@@ -104,7 +104,7 @@ func TestDashboardModelTruncatesWidthAndHeight(t *testing.T) {
 func TestDashboardModelFailureBadgeTakesLastLine(t *testing.T) {
 	model := newDashboardModel(context.Background(), func(context.Context) (string, error) {
 		return "", nil
-	}, DashboardOptions{Interval: time.Second, Width: 40, Height: 2})
+	}, DashboardOptions{Interval: time.Second, Size: Size{Width: 40, Height: 2}})
 	model.tick = noDashboardTick
 	model.Update(fetchResultMsg{Text: "first\nsecond"})
 	model.Update(fetchResultMsg{Err: errors.New("temporary")})
@@ -118,7 +118,7 @@ func TestDashboardModelFailureBadgeTakesLastLine(t *testing.T) {
 func TestDashboardModelIgnoresZeroSizeAndQuits(t *testing.T) {
 	model := newDashboardModel(context.Background(), func(context.Context) (string, error) {
 		return "", nil
-	}, DashboardOptions{Interval: time.Second, Width: 20, Height: 10})
+	}, DashboardOptions{Interval: time.Second, Size: Size{Width: 20, Height: 10}})
 	model.Update(tea.WindowSizeMsg{})
 	if model.width != 20 || model.height != 10 {
 		t.Fatalf("size = %dx%d, want 20x10", model.width, model.height)

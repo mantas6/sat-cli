@@ -83,7 +83,7 @@ func TestDashboardFollowIntervalsAndFetcher(t *testing.T) {
 			if err := run(t, app, test.args...); err != nil {
 				t.Fatal(err)
 			}
-			if want := (ui.DashboardOptions{Interval: test.want, Width: 120, Height: 40}); gotOpts != want {
+			if want := (ui.DashboardOptions{Interval: test.want, Size: ui.Size{Width: 120, Height: 40}}); gotOpts != want {
 				t.Fatalf("follow options = %#v, want %#v", gotOpts, want)
 			}
 			if apiCalls != 1 {
