@@ -107,7 +107,7 @@ func TestLoginRejectsInvalidURLNonInteractively(t *testing.T) {
 	t.Parallel()
 	cfg := &fakeConfig{}
 	stderr, err := executeLogin(t, cfg, "not-a-url\ntoken\n")
-	if err == nil || !strings.Contains(err.Error(), "base URL must be an absolute http or https URL") {
+	if err == nil || !strings.Contains(err.Error(), `invalid base URL "not-a-url": use an absolute http or https URL`) {
 		t.Fatalf("err = %v, want invalid base URL error", err)
 	}
 	if strings.Contains(stderr, "Invalid base URL") {

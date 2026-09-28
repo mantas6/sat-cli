@@ -3,10 +3,11 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mantas6/sat-cli/internal/api"
 )
 
 // StateDir resolves sat's state directory with an injectable environment
@@ -36,12 +37,12 @@ func StateDir(getenv func(string) string) (string, error) {
 	return filepath.Join(home, ".local", "state", "sat"), nil
 }
 
+// validateBaseURL checks value with api.ParseBaseURL, the same validator the
+// client uses, and returns it trimmed.
 func validateBaseURL(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", fmt.Errorf("invalid base URL %q: use an absolute http or https URL", value)
+	if _, err := api.ParseBaseURL(value); err != nil {
+		return "", err
 	}
 
-	return value, nil
+	return strings.TrimSpace(value), nil
 }

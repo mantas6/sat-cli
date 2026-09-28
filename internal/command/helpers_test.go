@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -169,12 +168,10 @@ func (c *fakeConfig) Token() (string, error) {
 }
 
 func (c *fakeConfig) SetBaseURL(value string) error {
-	value = strings.TrimSpace(value)
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return errors.New("base URL must be an absolute http or https URL")
+	if _, err := api.ParseBaseURL(value); err != nil {
+		return err
 	}
-	c.baseURL = value
+	c.baseURL = strings.TrimSpace(value)
 	return nil
 }
 

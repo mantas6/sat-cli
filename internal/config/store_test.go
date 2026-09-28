@@ -283,7 +283,7 @@ func TestStoreRejectsMalformedBaseURL(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))
 
-	for _, value := range []string{"", "example.com", "ftp://example.com", "://bad"} {
+	for _, value := range []string{"", "example.com", "ftp://example.com", "://bad", "https://u:p@example.com", "https://example.com/?q=1", "https://example.com/#top"} {
 		if err := store.SetBaseURL(value); err == nil {
 			t.Fatalf("SetBaseURL(%q) succeeded", value)
 		}

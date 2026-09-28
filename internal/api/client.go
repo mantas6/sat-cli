@@ -76,9 +76,9 @@ func WithUserAgent(userAgent string) Option {
 // POST is never silently replayed as a GET; a 3xx response is returned as an
 // *HTTPError. Unauthenticated requests use the configured redirect policy.
 func NewClient(baseURL, token string, options ...Option) (*Client, error) {
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, fmt.Errorf("invalid base URL %q: use an absolute http or https URL", strings.TrimSpace(baseURL))
+	parsed, err := ParseBaseURL(baseURL)
+	if err != nil {
+		return nil, err
 	}
 
 	settings := clientOptions{}
@@ -232,7 +232,6 @@ func (c *Client) resolve(path string, query url.Values) (string, error) {
 	resolved.Path = unescapedPath
 	resolved.RawPath = rawPath
 	resolved.RawQuery = query.Encode()
-	resolved.Fragment = ""
 
 	return resolved.String(), nil
 }
