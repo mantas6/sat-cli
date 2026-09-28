@@ -1,7 +1,6 @@
 package command
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,37 +9,27 @@ import (
 	"github.com/mantas6/sat-cli/internal/config"
 )
 
-func executeAuthStatus(app *App) (string, error) {
-	var out bytes.Buffer
-	normalizeApp(app)
-	command := newAuthCommand(app)
-	command.SetArgs(nil)
-	command.SetOut(&out)
-	err := command.Execute()
-	return out.String(), err
-}
-
 func TestAuthStatusConfigured(t *testing.T) {
-	cfg := &memoryConfig{
+	t.Parallel()
+	cfg := &fakeConfig{
 		dir:       "/state/sat",
 		baseURL:   "https://sat.example",
 		token:     "super-secret-token",
 		urlPath:   "/state/sat/url",
 		tokenPath: "/state/sat/token",
 	}
-	app := &App{Config: cfg, Getenv: func(string) string { return "" }}
+	app, stdout, _ := newTestApp(t, withConfig(cfg))
 
-	out, err := executeAuthStatus(app)
-	if err != nil {
+	if err := run(t, app, "auth"); err != nil {
 		t.Fatal(err)
 	}
-
+	out := stdout.String()
 	for _, want := range []string{
-		"State directory: /state/sat",
-		"Base URL:        https://sat.example",
-		"URL file:        /state/sat/url",
-		"Token:           configured",
-		"Token file:      /state/sat/token",
+		"State directory: /state/sat\n",
+		"Base URL:        https://sat.example\n",
+		"URL file:        /state/sat/url\n",
+		"Token:           configured\n",
+		"Token file:      /state/sat/token\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q\n%s", want, out)
@@ -56,27 +45,28 @@ func TestAuthStatusConfigured(t *testing.T) {
 }
 
 func TestAuthStatusUnconfigured(t *testing.T) {
-	cfg := &memoryConfig{
+	t.Parallel()
+	cfg := &fakeConfig{
 		dir:       "/state/sat",
 		urlPath:   "/state/sat/url",
 		tokenPath: "/state/sat/token",
 	}
-	app := &App{Config: cfg, Getenv: func(string) string { return "" }}
+	app, stdout, _ := newTestApp(t, withConfig(cfg))
 
-	out, err := executeAuthStatus(app)
-	if err != nil {
+	if err := run(t, app, "auth"); err != nil {
 		t.Fatal(err)
 	}
-
-	if !strings.Contains(out, "Base URL:        not configured") {
+	out := stdout.String()
+	if !strings.Contains(out, "Base URL:        not configured\n") {
 		t.Fatalf("expected unconfigured base URL:\n%s", out)
 	}
-	if !strings.Contains(out, "Token:           not configured") {
+	if !strings.Contains(out, "Token:           not configured\n") {
 		t.Fatalf("expected unconfigured token:\n%s", out)
 	}
 }
 
 func TestAuthStatusEnvOverride(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	urlFile := filepath.Join(dir, "custom-url")
 	tokenFile := filepath.Join(dir, "custom-token")
@@ -88,27 +78,25 @@ func TestAuthStatusEnvOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("SAT_URL_PATH", urlFile)
-	t.Setenv("SAT_TOKEN_PATH", tokenFile)
+	env := map[string]string{"SAT_URL_PATH": urlFile, "SAT_TOKEN_PATH": tokenFile}
+	getenv := func(key string) string { return env[key] }
+	store := config.NewStore(filepath.Join(dir, "state"), getenv)
+	app, stdout, _ := newTestApp(t, withConfig(store), withEnv(env))
 
-	store := config.NewStore(filepath.Join(dir, "state"), os.Getenv)
-	app := &App{Config: store, Getenv: os.Getenv}
-
-	out, err := executeAuthStatus(app)
-	if err != nil {
+	if err := run(t, app, "auth"); err != nil {
 		t.Fatal(err)
 	}
-
+	out := stdout.String()
 	if !strings.Contains(out, urlFile+"  (from SAT_URL_PATH)") {
 		t.Fatalf("expected SAT_URL_PATH override annotation:\n%s", out)
 	}
 	if !strings.Contains(out, tokenFile+"  (from SAT_TOKEN_PATH)") {
 		t.Fatalf("expected SAT_TOKEN_PATH override annotation:\n%s", out)
 	}
-	if !strings.Contains(out, "Base URL:        https://override.example") {
+	if !strings.Contains(out, "Base URL:        https://override.example\n") {
 		t.Fatalf("expected overridden base URL:\n%s", out)
 	}
-	if !strings.Contains(out, "Token:           configured") {
+	if !strings.Contains(out, "Token:           configured\n") {
 		t.Fatalf("expected configured token:\n%s", out)
 	}
 	if strings.Contains(out, tokenValue) {
@@ -117,26 +105,25 @@ func TestAuthStatusEnvOverride(t *testing.T) {
 }
 
 func TestAuthStatusInvalidURL(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "url"), []byte("not-a-url\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	store := config.NewStore(dir, func(string) string { return "" })
-	app := &App{Config: store, Getenv: func(string) string { return "" }}
+	app, stdout, _ := newTestApp(t, withConfig(store))
 
-	out, err := executeAuthStatus(app)
-	if err != nil {
+	if err := run(t, app, "auth"); err != nil {
 		t.Fatal(err)
 	}
-
-	if !strings.Contains(out, "Base URL:        invalid (") {
+	if out := stdout.String(); !strings.Contains(out, "Base URL:        invalid (") {
 		t.Fatalf("expected invalid base URL line:\n%s", out)
 	}
 }
 
 func TestLoginMovedUnderAuth(t *testing.T) {
-	app := &App{}
+	t.Parallel()
+	app, _, _ := newTestApp(t)
 	root := NewRootCommand(app)
 
 	if cmd, _, err := root.Find([]string{"login"}); err == nil && cmd.Name() == "login" {

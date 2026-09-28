@@ -1,38 +1,30 @@
 package command
 
 import (
-	"bytes"
-	"context"
 	"errors"
-	"io"
 	"os/exec"
 	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
+
+	"github.com/mantas6/sat-cli/internal/config"
 )
 
-type recordingSSHRunner struct {
-	name   string
-	args   []string
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
-	err    error
-}
-
-func (r *recordingSSHRunner) Run(_ context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	r.name = name
-	r.args = append([]string(nil), args...)
-	r.stdin = stdin
-	r.stdout = stdout
-	r.stderr = stderr
-	return r.err
+// newSSHTestApp returns an app whose base URL is https://sat.example.com and
+// whose runner records the ssh invocation.
+func newSSHTestApp(t *testing.T, env map[string]string) (*App, *fakeRunner) {
+	t.Helper()
+	cfg := newFakeConfig(t)
+	cfg.baseURL = "https://sat.example.com"
+	runner := &fakeRunner{}
+	app, _, _ := newTestApp(t, withConfig(cfg), withEnv(env), withRunner(runner))
+	return app, runner
 }
 
 func TestSSHTargetFromEnvironmentWithoutBaseURL(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{
 		"REMOTE_HOST": "ssh.example.test",
 		"REMOTE_USER": "deploy",
@@ -49,6 +41,7 @@ func TestSSHTargetFromEnvironmentWithoutBaseURL(t *testing.T) {
 }
 
 func TestSSHTargetDerivedFromURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		baseURL  string
@@ -56,10 +49,13 @@ func TestSSHTargetDerivedFromURL(t *testing.T) {
 	}{
 		{name: "three labels", baseURL: "https://sat.example.com", wantHost: "example.com"},
 		{name: "two labels", baseURL: "https://example.com", wantHost: "example.com"},
+		{name: "trailing dot", baseURL: "https://sat.example.com./", wantHost: "example.com"},
+		{name: "IP address", baseURL: "http://192.168.1.10:8080", wantHost: "192.168.1.10"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			target, err := resolveSSHTarget(func(string) string { return "" }, test.baseURL)
 			if err != nil {
 				t.Fatal(err)
@@ -74,7 +70,15 @@ func TestSSHTargetDerivedFromURL(t *testing.T) {
 	}
 }
 
+func TestSSHTargetRejectsBaseURLWithoutHost(t *testing.T) {
+	t.Parallel()
+	if _, err := resolveSSHTarget(func(string) string { return "" }, "file:///tmp"); err == nil || !strings.Contains(err.Error(), "has no host") {
+		t.Fatalf("resolveSSHTarget() error = %v, want no host", err)
+	}
+}
+
 func TestSSHRemoteRootDefaultsToHomeSatCurrent(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{"REMOTE_HOST": "configured-alias"}
 	target, err := resolveSSHTarget(func(key string) string { return env[key] }, "")
 	if err != nil {
@@ -89,6 +93,7 @@ func TestSSHRemoteRootDefaultsToHomeSatCurrent(t *testing.T) {
 }
 
 func TestSSHRemoteRootFromEnvironmentStaysQuotedVerbatim(t *testing.T) {
+	t.Parallel()
 	target := sshTarget{Host: "server", Root: `/srv/it's "sat" $HOME`}
 	if got, want := target.remoteDir(), `'/srv/it'\''s "sat" $HOME'`; got != want {
 		t.Fatalf("remoteDir() = %q, want %q", got, want)
@@ -96,10 +101,10 @@ func TestSSHRemoteRootFromEnvironmentStaysQuotedVerbatim(t *testing.T) {
 }
 
 func TestSSHCommandDefaultsRemoteRoot(t *testing.T) {
-	runner := &recordingSSHRunner{}
-	app := newSSHTestApp(runner, nil)
+	t.Parallel()
+	app, runner := newSSHTestApp(t, nil)
 
-	if err := executeRunTestCommand(app, "run", "about"); err != nil {
+	if err := run(t, app, "run", "about"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"-o", "LogLevel=ERROR", "example.com", `cd "$HOME"/Sat/current && php artisan 'about'`}
@@ -109,14 +114,14 @@ func TestSSHCommandDefaultsRemoteRoot(t *testing.T) {
 }
 
 func TestSSHCommandUsesUserPrefixAndQuotesArguments(t *testing.T) {
-	runner := &recordingSSHRunner{}
-	app := newSSHTestApp(runner, map[string]string{
+	t.Parallel()
+	app, runner := newSSHTestApp(t, map[string]string{
 		"REMOTE_HOST": "server",
 		"REMOTE_USER": "deploy",
 		"REMOTE_ROOT": "/srv/sat release/current",
 	})
 
-	if err := executeRunTestCommand(app, "run", "task", "two words", "it's", "$HOME"); err != nil {
+	if err := run(t, app, "run", "task", "two words", "it's", "$HOME"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -126,16 +131,19 @@ func TestSSHCommandUsesUserPrefixAndQuotesArguments(t *testing.T) {
 	if runner.name != sshBinary || !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("Run() = %q %#v, want %q %#v", runner.name, runner.args, sshBinary, want)
 	}
+	if runner.stdin != app.Stdin || runner.stdout != app.Stdout || runner.stderr != app.Stderr {
+		t.Fatal("ssh not attached to the app streams")
+	}
 }
 
 func TestSSHCommandPassesFlagsToArtisan(t *testing.T) {
-	runner := &recordingSSHRunner{}
-	app := newSSHTestApp(runner, map[string]string{
+	t.Parallel()
+	app, runner := newSSHTestApp(t, map[string]string{
 		"REMOTE_HOST": "server",
 		"REMOTE_ROOT": "/srv/current",
 	})
 
-	if err := executeRunTestCommand(app, "run", "migrate", "--force"); err != nil {
+	if err := run(t, app, "run", "migrate", "--force"); err != nil {
 		t.Fatal(err)
 	}
 	if got := runner.args[len(runner.args)-1]; got != "cd '/srv/current' && php artisan 'migrate' '--force'" {
@@ -144,13 +152,13 @@ func TestSSHCommandPassesFlagsToArtisan(t *testing.T) {
 }
 
 func TestSSHCommandOmitsArtisanArgumentsWhenEmpty(t *testing.T) {
-	runner := &recordingSSHRunner{}
-	app := newSSHTestApp(runner, map[string]string{
+	t.Parallel()
+	app, runner := newSSHTestApp(t, map[string]string{
 		"REMOTE_HOST": "server",
 		"REMOTE_ROOT": "/srv/current",
 	})
 
-	if err := executeRunTestCommand(app, "run"); err != nil {
+	if err := run(t, app, "run"); err != nil {
 		t.Fatal(err)
 	}
 	if got := runner.args[len(runner.args)-1]; got != "cd '/srv/current' && php artisan" {
@@ -158,7 +166,8 @@ func TestSSHCommandOmitsArtisanArgumentsWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestSSHCommandAddsTTYOnlyForTerminalFiles(t *testing.T) {
+func TestSSHCommandAddsTTYOnlyForTerminals(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		stdinTTY  bool
@@ -173,19 +182,22 @@ func TestSSHCommandAddsTTYOnlyForTerminalFiles(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := &recordingSSHRunner{}
-			app := newSSHTestApp(runner, map[string]string{
+			t.Parallel()
+			app, runner := newSSHTestApp(t, map[string]string{
 				"REMOTE_HOST": "server",
 				"REMOTE_ROOT": "/srv/current",
 			})
 			app.IsTTY = func(stream any) bool {
-				if stream == app.Stdin {
+				switch stream {
+				case app.Stdin:
 					return test.stdinTTY
+				case app.Stdout:
+					return test.stdoutTTY
 				}
-				return stream == app.Stdout && test.stdoutTTY
+				return false
 			}
 
-			if err := executeRunTestCommand(app, "run"); err != nil {
+			if err := run(t, app, "run"); err != nil {
 				t.Fatal(err)
 			}
 			got := len(runner.args) >= 3 && runner.args[2] == "-t"
@@ -197,18 +209,16 @@ func TestSSHCommandAddsTTYOnlyForTerminalFiles(t *testing.T) {
 }
 
 func TestSSHCommandPreservesExitCode(t *testing.T) {
+	t.Parallel()
 	execErr := exec.Command("sh", "-c", "exit 3").Run()
 	var processErr *exec.ExitError
 	if !errors.As(execErr, &processErr) {
 		t.Fatalf("test setup error = %v, want *exec.ExitError", execErr)
 	}
 
-	runner := &recordingSSHRunner{err: execErr}
-	app := newSSHTestApp(runner, map[string]string{
-		"REMOTE_HOST": "server",
-		"REMOTE_ROOT": "/srv/current",
-	})
-	err := executeRunTestCommand(app, "run")
+	app, runner := newSSHTestApp(t, map[string]string{"REMOTE_HOST": "server"})
+	runner.err = execErr
+	err := run(t, app, "run")
 	var exitErr ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != 3 {
 		t.Fatalf("Execute() error = %#v, want ExitError with code 3", err)
@@ -218,7 +228,21 @@ func TestSSHCommandPreservesExitCode(t *testing.T) {
 	}
 }
 
+func TestSSHCommandReturnsStartErrors(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("ssh not found")
+	app, runner := newSSHTestApp(t, map[string]string{"REMOTE_HOST": "server"})
+	runner.err = wantErr
+
+	err := run(t, app, "run")
+	var exitErr ExitError
+	if !errors.Is(err, wantErr) || errors.As(err, &exitErr) {
+		t.Fatalf("Execute() error = %#v, want the plain start error", err)
+	}
+}
+
 func TestSSHCommandMapsSignalExitToConventionalCode(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("signal termination semantics are unix-specific")
 	}
@@ -234,12 +258,9 @@ func TestSSHCommandMapsSignalExitToConventionalCode(t *testing.T) {
 		t.Fatalf("ExitCode() = %d, want -1 (signalled)", processErr.ExitCode())
 	}
 
-	runner := &recordingSSHRunner{err: execErr}
-	app := newSSHTestApp(runner, map[string]string{
-		"REMOTE_HOST": "server",
-		"REMOTE_ROOT": "/srv/current",
-	})
-	err := executeRunTestCommand(app, "run")
+	app, runner := newSSHTestApp(t, map[string]string{"REMOTE_HOST": "server"})
+	runner.err = execErr
+	err := run(t, app, "run")
 	var exitErr ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != 128+int(syscall.SIGTERM) {
 		t.Fatalf("Execute() error = %#v, want ExitError with code %d", err, 128+int(syscall.SIGTERM))
@@ -249,67 +270,30 @@ func TestSSHCommandMapsSignalExitToConventionalCode(t *testing.T) {
 	}
 }
 
-func TestExecRunnerForwardsCancellationAsSignal(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("signal forwarding is unix-specific")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	result := make(chan error, 1)
-	go func() {
-		result <- ExecRunner{Grace: 100 * time.Millisecond}.Run(ctx, "sleep", []string{"10"}, nil, io.Discard, io.Discard)
-	}()
-
-	time.AfterFunc(50*time.Millisecond, cancel)
-
-	select {
-	case err := <-result:
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			t.Fatalf("Run() error = %v, want *exec.ExitError", err)
-		}
-		code, ok := signalExitCode(exitErr)
-		if !ok {
-			t.Fatalf("signalExitCode() reported no signal for %v", exitErr)
-		}
-		if code != 128+int(syscall.SIGTERM) {
-			t.Fatalf("derived exit code = %d, want %d", code, 128+int(syscall.SIGTERM))
-		}
-	case <-time.After(5 * time.Second):
-		cancel()
-		t.Fatal("Run() did not return after context cancellation")
-	}
-}
-
 func TestSSHCommandHelpDoesNotRunSSH(t *testing.T) {
+	t.Parallel()
 	for _, helpArg := range []string{"--help", "-h"} {
 		t.Run(helpArg, func(t *testing.T) {
-			var output bytes.Buffer
-			runner := &recordingSSHRunner{}
-			app := newSSHTestApp(runner, nil)
-			app.Stdout = &output
+			t.Parallel()
+			// The default runner fails the test if ssh starts.
+			app, stdout, _ := newTestApp(t)
 
-			if err := executeRunTestCommand(app, "run", helpArg); err != nil {
+			if err := run(t, app, "run", helpArg); err != nil {
 				t.Fatal(err)
 			}
-			if runner.name != "" {
-				t.Fatalf("runner called with %q", runner.name)
-			}
-			if !strings.Contains(output.String(), "run [artisan arguments...]") {
-				t.Fatalf("help output = %q", output.String())
+			if !strings.Contains(stdout.String(), "run [artisan arguments...]") {
+				t.Fatalf("help output = %q", stdout.String())
 			}
 		})
 	}
 }
 
 func TestSSHCommandSkipsFailingBaseURLWhenHostIsConfigured(t *testing.T) {
-	runner := &recordingSSHRunner{}
-	app := newSSHTestApp(runner, map[string]string{"REMOTE_HOST": "server"})
-	app.Config = &stubConfig{baseErr: errors.New("base URL unavailable")}
+	t.Parallel()
+	app, runner := newSSHTestApp(t, map[string]string{"REMOTE_HOST": "server"})
+	app.Config.(*fakeConfig).baseURLErr = errors.New("base URL unavailable")
 
-	if err := executeRunTestCommand(app, "run"); err != nil {
+	if err := run(t, app, "run"); err != nil {
 		t.Fatal(err)
 	}
 	if got := runner.args[len(runner.args)-1]; got != `cd "$HOME"/Sat/current && php artisan` {
@@ -317,22 +301,14 @@ func TestSSHCommandSkipsFailingBaseURLWhenHostIsConfigured(t *testing.T) {
 	}
 }
 
-func newSSHTestApp(runner ProcessRunner, env map[string]string) *App {
-	output := &bytes.Buffer{}
-	return &App{
-		Config: &stubConfig{baseURL: "https://sat.example.com"},
-		Stdin:  &bytes.Buffer{},
-		Stdout: output,
-		Stderr: output,
-		Getenv: func(key string) string {
-			return env[key]
-		},
-		Runner: runner,
-	}
-}
+func TestSSHCommandRequiresBaseURLWithoutHost(t *testing.T) {
+	t.Parallel()
+	cfg := newFakeConfig(t)
+	cfg.baseURL = ""
+	// The default runner fails the test if ssh starts.
+	app, _, _ := newTestApp(t, withConfig(cfg))
 
-func executeRunTestCommand(app *App, args ...string) error {
-	command := NewRootCommand(app)
-	command.SetArgs(args)
-	return command.Execute()
+	if err := run(t, app, "run"); !errors.Is(err, config.ErrBaseURLMissing) {
+		t.Fatalf("Execute() error = %v, want missing base URL", err)
+	}
 }

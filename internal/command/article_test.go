@@ -1,7 +1,6 @@
 package command
 
 import (
-	"bytes"
 	"context"
 	"reflect"
 	"strings"
@@ -11,27 +10,8 @@ import (
 	"github.com/mantas6/sat-cli/internal/ui"
 )
 
-type articleAPI struct {
-	*stubAPI
-	list func(context.Context, bool) ([]api.Article, error)
-	get  func(context.Context, int) (api.ArticleContents, error)
-}
-
-func (a *articleAPI) ListArticles(ctx context.Context, all bool) ([]api.Article, error) {
-	if a.list == nil {
-		return nil, nil
-	}
-	return a.list(ctx, all)
-}
-
-func (a *articleAPI) GetArticle(ctx context.Context, id int) (api.ArticleContents, error) {
-	if a.get == nil {
-		return api.ArticleContents{}, nil
-	}
-	return a.get(ctx, id)
-}
-
 func TestArticleItemFormatsLegacyCacheLine(t *testing.T) {
+	t.Parallel()
 	article := api.Article{
 		ID:        42,
 		Title:     "A title",
@@ -49,6 +29,7 @@ func TestArticleItemFormatsLegacyCacheLine(t *testing.T) {
 }
 
 func TestArticleItemNeutralisesSeparatorsInFields(t *testing.T) {
+	t.Parallel()
 	article := api.Article{
 		ID:        7,
 		Title:     "Tabs\tand\nnew\r\nlines\r",
@@ -56,26 +37,31 @@ func TestArticleItemNeutralisesSeparatorsInFields(t *testing.T) {
 		CreatedAt: "today\n",
 		Journal:   &api.Journal{Title: "Work\tLog"},
 	}
-	line := cacheLine(articleItem(article))
+	item := articleItem(article)
+	line := cacheLine(item)
 	if got, want := line, "7\tTabs and new lines \t1w\ttoday \tWork Log"; got != want {
 		t.Fatalf("cacheLine(articleItem()) = %q, want %q", got, want)
 	}
 	items := parseCacheLines([]string{line})
-	if len(items) != 1 || items[0].ID != "7" || len(items[0].Columns) != 4 {
-		t.Fatalf("parseCacheLines(cacheLine(articleItem())) = %#v, want one item with 4 columns", items)
+	if !reflect.DeepEqual(items, []ui.Item{item}) {
+		t.Fatalf("parseCacheLines(cacheLine(item)) = %#v, want %#v", items, []ui.Item{item})
 	}
 }
 
 func TestParseCacheLinesToleratesLegacyShortLines(t *testing.T) {
+	t.Parallel()
 	got := parseCacheLines([]string{
 		"",
 		" \t ",
+		"\tno ID",
 		"7",
 		"8\tTitle\t20w\t2026-09-21\tJournal",
+		"track-id\tArtist\t/Album\t/03.\tTitle",
 	})
 	want := []ui.Item{
 		{ID: "7", Columns: []string{}},
 		{ID: "8", Columns: []string{"Title", "20w", "2026-09-21", "Journal"}},
+		{ID: "track-id", Columns: []string{"Artist", "/Album", "/03.", "Title"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseCacheLines() = %#v, want %#v", got, want)
@@ -83,44 +69,42 @@ func TestParseCacheLinesToleratesLegacyShortLines(t *testing.T) {
 }
 
 func TestCachedArticleItemsCacheHitSkipsAPI(t *testing.T) {
-	called := false
-	client := &articleAPI{stubAPI: &stubAPI{}, list: func(context.Context, bool) ([]api.Article, error) {
-		called = true
+	t.Parallel()
+	client := &fakeAPI{listArticles: func(context.Context, bool) ([]api.Article, error) {
+		t.Error("ListArticles() called on a cache hit")
 		return nil, nil
 	}}
-	store := &cacheConfig{
-		stubConfig: &stubConfig{},
-		exists:     true,
-		lines:      []string{"1\tOld", "2\tNew"},
-	}
-	app := &App{Config: store, Stderr: &bytes.Buffer{}}
+	cfg := newFakeConfig(t)
+	cfg.caches = map[string][]string{articleCacheName: {"1\tOld", "2\tNew"}}
+	app, _, stderr := newTestApp(t, withConfig(cfg))
 
-	items, err := cachedArticleItems(context.Background(), app, client, true)
+	items, err := cachedArticleItems(t.Context(), app, client, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if called {
-		t.Fatal("ListArticles() called on a cache hit")
+	want := []ui.Item{{ID: "2", Columns: []string{"New"}}, {ID: "1", Columns: []string{"Old"}}}
+	if !reflect.DeepEqual(items, want) {
+		t.Fatalf("cachedArticleItems() = %#v, want reversed cache %#v", items, want)
 	}
-	if len(items) != 2 || items[0].ID != "2" {
-		t.Fatalf("cachedArticleItems() = %#v, want reversed cache", items)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want nothing on a cache hit", stderr.String())
 	}
 }
 
 func TestCachedArticleItemsCacheMissFetchesAllAndWritesCache(t *testing.T) {
+	t.Parallel()
 	var gotAll bool
-	client := &articleAPI{stubAPI: &stubAPI{}, list: func(_ context.Context, all bool) ([]api.Article, error) {
+	client := &fakeAPI{listArticles: func(_ context.Context, all bool) ([]api.Article, error) {
 		gotAll = all
 		return []api.Article{
 			{ID: 1, Title: "Old", WordCount: 10, CreatedAt: "yesterday"},
 			{ID: 2, Title: "New", WordCount: 20, CreatedAt: "today", Journal: &api.Journal{Title: "Daily"}},
 		}, nil
 	}}
-	store := &cacheConfig{stubConfig: &stubConfig{}}
-	stderr := &bytes.Buffer{}
-	app := &App{Config: store, Stderr: stderr}
+	cfg := newFakeConfig(t)
+	app, _, stderr := newTestApp(t, withConfig(cfg))
 
-	items, err := cachedArticleItems(context.Background(), app, client, true)
+	items, err := cachedArticleItems(t.Context(), app, client, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +112,11 @@ func TestCachedArticleItemsCacheMissFetchesAllAndWritesCache(t *testing.T) {
 		t.Fatal("ListArticles() all = false, want true")
 	}
 	wantLines := []string{"1\tOld\t10w\tyesterday\t", "2\tNew\t20w\ttoday\tDaily"}
-	if store.writtenKey != articleCacheName || !reflect.DeepEqual(store.written, wantLines) {
-		t.Fatalf("cache write = (%q, %#v), want (%q, %#v)", store.writtenKey, store.written, articleCacheName, wantLines)
+	if got := cfg.caches[articleCacheName]; !reflect.DeepEqual(got, wantLines) {
+		t.Fatalf("article cache = %#v, want %#v", got, wantLines)
 	}
-	if len(items) != 2 || items[0].ID != "2" {
-		t.Fatalf("items = %#v, want newest first", items)
+	if want := parseCacheLines([]string{wantLines[1], wantLines[0]}); !reflect.DeepEqual(items, want) {
+		t.Fatalf("items = %#v, want newest first %#v", items, want)
 	}
 	if stderr.String() != "Fetching articles list...\n" {
 		t.Fatalf("stderr = %q", stderr.String())
@@ -140,33 +124,50 @@ func TestCachedArticleItemsCacheMissFetchesAllAndWritesCache(t *testing.T) {
 }
 
 func TestParseArticleID(t *testing.T) {
+	t.Parallel()
 	for input, want := range map[string]int{"1": 1, " 42\n": 42} {
 		if got, err := parseArticleID(input); err != nil || got != want {
 			t.Fatalf("parseArticleID(%q) = %d, %v; want %d", input, got, err, want)
 		}
 	}
 	for _, input := range []string{"", "0", "-3", "..", "new", "12a"} {
-		if got, err := parseArticleID(input); err == nil {
-			t.Fatalf("parseArticleID(%q) = %d, want error", input, got)
+		if got, err := parseArticleID(input); err == nil || !strings.Contains(err.Error(), "invalid article ID") {
+			t.Fatalf("parseArticleID(%q) = %d, %v; want invalid article ID", input, got, err)
 		}
 	}
 }
 
 func TestArticleCommandsRejectInvalidIDs(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"article", "read", "--id", ".."},
 		{"article", "read", "--id", "0"},
 		{"article", "edit", "--id", "new"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			client := &articleAPI{stubAPI: &stubAPI{}, get: func(context.Context, int) (api.ArticleContents, error) {
-				t.Fatal("GetArticle() called with an invalid ID")
+			t.Parallel()
+			client := &fakeAPI{getArticle: func(context.Context, int) (api.ArticleContents, error) {
+				t.Error("GetArticle() called with an invalid ID")
 				return api.ArticleContents{}, nil
 			}}
-			app, _ := newArticleTestApp(client, nil)
-			err := executeArticleTestCommand(app, args...)
+			app, _, _ := newTestApp(t, withAPI(client))
+			err := run(t, app, args...)
 			if err == nil || !strings.Contains(err.Error(), "invalid article ID") {
 				t.Fatalf("Execute() error = %v, want invalid article ID", err)
+			}
+		})
+	}
+}
+
+func TestArticleCommandsRejectEmptyIDFlag(t *testing.T) {
+	t.Parallel()
+	for _, sub := range []string{"read", "edit"} {
+		t.Run(sub, func(t *testing.T) {
+			t.Parallel()
+			app, _, _ := newTestApp(t)
+			err := run(t, app, "article", sub, "--id", " ")
+			if err == nil || err.Error() != "article ID must not be empty" {
+				t.Fatalf("Execute() error = %v, want empty ID error", err)
 			}
 		})
 	}

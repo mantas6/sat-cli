@@ -1,41 +1,50 @@
 package command
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	configpkg "github.com/mantas6/sat-cli/internal/config"
+	"github.com/mantas6/sat-cli/internal/config"
 	"golang.org/x/term"
 )
 
+// executeLogin runs `sat auth login` with args against cfg, reading input
+// from a non-terminal stdin, and returns stderr.
+func executeLogin(t *testing.T, cfg *fakeConfig, input string, args ...string) (string, error) {
+	t.Helper()
+	app, _, stderr := newTestApp(t, withConfig(cfg), withStdin(strings.NewReader(input)))
+	err := run(t, app, append([]string{"auth", "login"}, args...)...)
+	return stderr.String(), err
+}
+
 func TestLoginPromptsForMissingURLAndToken(t *testing.T) {
-	config := &memoryConfig{}
-	stderr, err := executeLogin(config, "https://sat.example\nnew-token\n")
+	t.Parallel()
+	cfg := &fakeConfig{}
+	stderr, err := executeLogin(t, cfg, "https://sat.example\nnew-token\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.baseURL != "https://sat.example" || config.token != "new-token" {
-		t.Fatalf("config = URL %q, token %q", config.baseURL, config.token)
+	if cfg.baseURL != "https://sat.example" || cfg.token != "new-token" {
+		t.Fatalf("config = URL %q, token %q", cfg.baseURL, cfg.token)
 	}
-	if !strings.Contains(stderr, "Base URL: ") || !strings.Contains(stderr, "Token: ") {
-		t.Fatalf("prompts = %q", stderr)
+	if want := "Base URL: URL saved.\nToken: Token saved.\n"; stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
 	}
 }
 
 func TestLoginSkipsConfiguredURL(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://existing.example"}
-	stderr, err := executeLogin(config, "new-token\n")
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://existing.example"}
+	stderr, err := executeLogin(t, cfg, "new-token\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.baseURL != "https://existing.example" {
-		t.Fatalf("base URL = %q", config.baseURL)
+	if cfg.baseURL != "https://existing.example" || cfg.token != "new-token" {
+		t.Fatalf("config = URL %q, token %q", cfg.baseURL, cfg.token)
 	}
 	if strings.Contains(stderr, "Base URL: ") {
 		t.Fatalf("unexpected URL prompt: %q", stderr)
@@ -43,109 +52,132 @@ func TestLoginSkipsConfiguredURL(t *testing.T) {
 }
 
 func TestLoginReplacesURLWithFlag(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://old.example"}
-	_, err := executeLogin(config, "https://new.example\nnew-token\n", "--replace-url")
-	if err != nil {
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://old.example"}
+	if _, err := executeLogin(t, cfg, "https://new.example\nnew-token\n", "--replace-url"); err != nil {
 		t.Fatal(err)
 	}
-	if config.baseURL != "https://new.example" {
-		t.Fatalf("base URL = %q", config.baseURL)
+	if cfg.baseURL != "https://new.example" || cfg.token != "new-token" {
+		t.Fatalf("config = URL %q, token %q", cfg.baseURL, cfg.token)
 	}
 }
 
 func TestLoginURLOnlyReplacesURLWithoutToken(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://old.example", token: "existing-token"}
-	_, err := executeLogin(config, "https://new.example\n", "--url-only")
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://old.example", token: "existing-token"}
+	stderr, err := executeLogin(t, cfg, "https://new.example\n", "--url-only")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.baseURL != "https://new.example" || config.token != "existing-token" {
-		t.Fatalf("config = URL %q, token %q", config.baseURL, config.token)
+	if cfg.baseURL != "https://new.example" || cfg.token != "existing-token" {
+		t.Fatalf("config = URL %q, token %q", cfg.baseURL, cfg.token)
+	}
+	if strings.Contains(stderr, "Token") {
+		t.Fatalf("stderr = %q, want no token prompt", stderr)
 	}
 }
 
 func TestLoginWarnsWhenReplacingToken(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://sat.example", token: "old-token"}
-	stderr, err := executeLogin(config, "new-token\n")
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://sat.example", token: "old-token"}
+	stderr, err := executeLogin(t, cfg, "new-token\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr, "Token is already defined; it will be replaced") {
+	if !strings.Contains(stderr, "Token is already defined; it will be replaced\n") {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if config.token != "new-token" {
-		t.Fatalf("token = %q", config.token)
+	if cfg.token != "new-token" {
+		t.Fatalf("token = %q", cfg.token)
 	}
 }
 
 func TestLoginRejectsEmptyToken(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://sat.example"}
-	if _, err := executeLogin(config, "\n"); err == nil {
-		t.Fatal("expected an empty token error")
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://sat.example", token: "old-token"}
+	if _, err := executeLogin(t, cfg, "\n"); !errors.Is(err, config.ErrTokenMissing) {
+		t.Fatalf("err = %v, want ErrTokenMissing", err)
+	}
+	if cfg.token != "old-token" {
+		t.Fatalf("token = %q, want the old token kept", cfg.token)
 	}
 }
 
 func TestLoginRejectsInvalidURLNonInteractively(t *testing.T) {
-	config := &memoryConfig{}
-	if _, err := executeLogin(config, "not-a-url\ntoken\n"); err == nil {
-		t.Fatal("expected an invalid URL error")
+	t.Parallel()
+	cfg := &fakeConfig{}
+	stderr, err := executeLogin(t, cfg, "not-a-url\ntoken\n")
+	if err == nil || !strings.Contains(err.Error(), "base URL must be an absolute http or https URL") {
+		t.Fatalf("err = %v, want invalid base URL error", err)
 	}
-	if config.baseURL != "" || config.token != "" {
-		t.Fatalf("config changed to URL %q, token %q", config.baseURL, config.token)
+	if strings.Contains(stderr, "Invalid base URL") {
+		t.Fatalf("stderr = %q, want no retry prompt without a terminal", stderr)
+	}
+	if cfg.baseURL != "" || cfg.token != "" {
+		t.Fatalf("config changed to URL %q, token %q", cfg.baseURL, cfg.token)
+	}
+}
+
+func TestLoginRetriesInvalidURLInteractively(t *testing.T) {
+	t.Parallel()
+	cfg := &fakeConfig{}
+	app, _, stderr := newTestApp(t, withConfig(cfg), withTTY(),
+		withStdin(strings.NewReader("bad\nhttps://sat.example\n")))
+	if err := run(t, app, "auth", "login", "--url-only"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.baseURL != "https://sat.example" {
+		t.Fatalf("base URL = %q", cfg.baseURL)
+	}
+	if strings.Count(stderr.String(), "Base URL: ") != 2 || !strings.Contains(stderr.String(), "Invalid base URL: ") {
+		t.Fatalf("stderr = %q, want a retry after the invalid URL", stderr.String())
 	}
 }
 
 func TestLoginReadsNonInteractiveTokenFromStdin(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://sat.example"}
-	stderr, err := executeLogin(config, "piped-token\n")
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://sat.example"}
+	stderr, err := executeLogin(t, cfg, "piped-token\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.token != "piped-token" {
-		t.Fatalf("token = %q", config.token)
+	if cfg.token != "piped-token" {
+		t.Fatalf("token = %q", cfg.token)
 	}
-	if !strings.Contains(stderr, "Token saved.") {
+	if !strings.Contains(stderr, "Token saved.\n") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
 
 func TestLoginTokenPromptCancels(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://sat.example"}
-
-	stdin, cleanupStdin := terminalFile(t)
-	defer cleanupStdin()
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://sat.example"}
+	// A real *os.File selects the hidden token path; ReadPassword is stubbed,
+	// so nothing is read from it.
+	stdin, _ := pipe(t)
 
 	started := make(chan struct{})
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-
 	restored := make(chan struct{}, 1)
-	app := &App{
-		Config: config,
-		Stdin:  stdin,
-		Stdout: &bytes.Buffer{},
-		Stderr: &bytes.Buffer{},
-		IsTTY:  func(any) bool { return true },
-		ReadPassword: func(int) ([]byte, error) {
-			close(started)
-			<-release
-			return nil, io.EOF
-		},
-		TerminalState: func(int) (*term.State, error) { return &term.State{}, nil },
-		RestoreTerminal: func(int, *term.State) error {
-			restored <- struct{}{}
-			return nil
-		},
-	}
-	normalizeApp(app)
-	command := newLoginCommand(app)
-	command.SetArgs(nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	app, _, _ := newTestApp(t, withConfig(cfg), withStdin(stdin), withTTY())
+	app.ReadPassword = func(int) ([]byte, error) {
+		close(started)
+		<-release
+		return nil, io.EOF
+	}
+	app.TerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
+	app.RestoreTerminal = func(int, *term.State) error {
+		restored <- struct{}{}
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- command.ExecuteContext(ctx) }()
+	go func() { errCh <- runContext(ctx, app, "auth", "login") }()
 
 	<-started
 	cancel()
@@ -162,52 +194,45 @@ func TestLoginTokenPromptCancels(t *testing.T) {
 	select {
 	case <-restored:
 	default:
-		t.Fatal("restoreTerminal was not called")
+		t.Fatal("RestoreTerminal was not called")
 	}
 
-	if config.token != "" || config.baseURL != "https://sat.example" {
-		t.Fatalf("config changed to URL %q, token %q", config.baseURL, config.token)
+	if cfg.token != "" || cfg.baseURL != "https://sat.example" {
+		t.Fatalf("config changed to URL %q, token %q", cfg.baseURL, cfg.token)
 	}
 }
 
 func TestLoginTokenPromptEOFReturnsMissing(t *testing.T) {
-	config := &memoryConfig{baseURL: "https://sat.example"}
+	t.Parallel()
+	cfg := &fakeConfig{baseURL: "https://sat.example"}
+	stdin, _ := pipe(t)
 
-	stdin, cleanupStdin := terminalFile(t)
-	defer cleanupStdin()
+	app, _, stderr := newTestApp(t, withConfig(cfg), withStdin(stdin), withTTY())
+	app.ReadPassword = func(int) ([]byte, error) { return nil, io.EOF }
+	app.TerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
 
-	app := &App{
-		Config:          config,
-		Stdin:           stdin,
-		Stdout:          &bytes.Buffer{},
-		Stderr:          &bytes.Buffer{},
-		IsTTY:           func(any) bool { return true },
-		ReadPassword:    func(int) ([]byte, error) { return nil, io.EOF },
-		TerminalState:   func(int) (*term.State, error) { return &term.State{}, nil },
-		RestoreTerminal: func(int, *term.State) error { return nil },
-	}
-	normalizeApp(app)
-	command := newLoginCommand(app)
-	command.SetArgs(nil)
-
-	err := command.Execute()
-	if !errors.Is(err, configpkg.ErrTokenMissing) {
+	err := run(t, app, "auth", "login")
+	if !errors.Is(err, config.ErrTokenMissing) {
 		t.Fatalf("err = %v, want ErrTokenMissing", err)
 	}
-	if config.token != "" {
-		t.Fatalf("token = %q", config.token)
+	if cfg.token != "" {
+		t.Fatalf("token = %q", cfg.token)
+	}
+	if stderr.String() != "Token: \n" {
+		t.Fatalf("stderr = %q, want the prompt line terminated", stderr.String())
 	}
 }
 
 func TestLoginURLPromptCancels(t *testing.T) {
-	config := &memoryConfig{}
+	t.Parallel()
+	cfg := &fakeConfig{}
 
 	started := make(chan struct{})
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 
 	var startedOnce bool
-	reader := readerFunc(func(p []byte) (int, error) {
+	reader := readerFunc(func([]byte) (int, error) {
 		if !startedOnce {
 			startedOnce = true
 			close(started)
@@ -215,23 +240,13 @@ func TestLoginURLPromptCancels(t *testing.T) {
 		<-release
 		return 0, io.EOF
 	})
+	app, _, _ := newTestApp(t, withConfig(cfg), withStdin(reader))
 
-	app := &App{
-		Config: config,
-		Stdin:  reader,
-		Stdout: &bytes.Buffer{},
-		Stderr: &bytes.Buffer{},
-		IsTTY:  func(any) bool { return false },
-	}
-	normalizeApp(app)
-	command := newLoginCommand(app)
-	command.SetArgs(nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- command.ExecuteContext(ctx) }()
+	go func() { errCh <- runContext(ctx, app, "auth", "login") }()
 
 	<-started
 	cancel()
@@ -245,41 +260,11 @@ func TestLoginURLPromptCancels(t *testing.T) {
 		t.Fatal("login did not cancel in time")
 	}
 
-	if config.baseURL != "" || config.token != "" {
-		t.Fatalf("config changed to URL %q, token %q", config.baseURL, config.token)
-	}
-}
-
-// terminalFile returns a real *os.File (the read end of a pipe) so the hidden
-// token path is taken; App.ReadPassword itself is stubbed, so nothing is read.
-func terminalFile(t *testing.T) (*os.File, func()) {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	return r, func() {
-		r.Close()
-		w.Close()
+	if cfg.baseURL != "" || cfg.token != "" {
+		t.Fatalf("config changed to URL %q, token %q", cfg.baseURL, cfg.token)
 	}
 }
 
 type readerFunc func([]byte) (int, error)
 
 func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
-
-func executeLogin(config *memoryConfig, input string, args ...string) (string, error) {
-	var stderr bytes.Buffer
-	app := &App{
-		Config: config,
-		Stdin:  strings.NewReader(input),
-		Stdout: &bytes.Buffer{},
-		Stderr: &stderr,
-		IsTTY:  func(any) bool { return false },
-	}
-	normalizeApp(app)
-	command := newLoginCommand(app)
-	command.SetArgs(args)
-	err := command.Execute()
-	return stderr.String(), err
-}

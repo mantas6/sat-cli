@@ -1,102 +1,43 @@
 package command
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/mantas6/sat-cli/internal/api"
 	"github.com/mantas6/sat-cli/internal/ui"
 )
 
-type musicAPI struct {
-	*stubAPI
-	saved   func(context.Context) ([]string, error)
-	play    func(context.Context, string) error
-	control func(context.Context, api.PlaybackAction) error
+// trackConfig returns a configured fakeConfig whose track cache holds lines.
+func trackConfig(t *testing.T, lines ...string) *fakeConfig {
+	t.Helper()
+	cfg := newFakeConfig(t)
+	cfg.caches = map[string][]string{trackCacheName: lines}
+	return cfg
 }
 
-func (m *musicAPI) SavedTracks(ctx context.Context) ([]string, error) {
-	if m.saved == nil {
-		return nil, nil
-	}
-	return m.saved(ctx)
-}
-
-func (m *musicAPI) PlayTrack(ctx context.Context, id string) error {
-	if m.play == nil {
-		return nil
-	}
-	return m.play(ctx, id)
-}
-
-func (m *musicAPI) ControlPlayback(ctx context.Context, action api.PlaybackAction) error {
-	if m.control == nil {
-		return nil
-	}
-	return m.control(ctx, action)
-}
-
-type cacheConfig struct {
-	*stubConfig
-	lines      []string
-	exists     bool
-	readErr    error
-	writtenKey string
-	written    []string
-	writeErr   error
-}
-
-func (c *cacheConfig) ReadCacheLines(name string) ([]string, bool, error) {
-	return append([]string(nil), c.lines...), c.exists, c.readErr
-}
-
-func (c *cacheConfig) WriteCacheLines(name string, lines []string) error {
-	c.writtenKey = name
-	c.written = append([]string(nil), lines...)
-	return c.writeErr
-}
-
-func newMusicTestApp(client APIClient, store *cacheConfig) (*App, *bytes.Buffer, *bytes.Buffer) {
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	if store == nil {
-		store = &cacheConfig{stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"}}
-	}
-	return &App{
-		Config: store,
-		NewAPIClient: func(string, string) (APIClient, error) {
-			return client, nil
-		},
-		Stdin:  strings.NewReader(""),
-		Stdout: stdout,
-		Stderr: stderr,
-	}, stdout, stderr
-}
-
-func executeMusicTestCommand(app *App, args ...string) error {
-	command := NewRootCommand(app)
-	command.SetArgs(args)
-	return command.Execute()
+var twoTracks = []string{
+	"one\tFirst artist\t/Album\t/01.\tFirst track",
+	"two\tSecond artist\t/Album\t/02.\tSecond track",
 }
 
 func TestMusicSyncWritesTrackCache(t *testing.T) {
+	t.Parallel()
 	want := []string{"id-1\tArtist\t/Album\t/01.\tTrack", "id-2\tArtist\t/Album\t/02.\tOther"}
-	client := &musicAPI{stubAPI: &stubAPI{}, saved: func(context.Context) ([]string, error) {
+	client := &fakeAPI{savedTracks: func(context.Context) ([]string, error) {
 		return want, nil
 	}}
-	store := &cacheConfig{stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"}}
-	app, _, stderr := newMusicTestApp(client, store)
+	cfg := newFakeConfig(t)
+	app, _, stderr := newTestApp(t, withAPI(client), withConfig(cfg))
 
-	if err := executeMusicTestCommand(app, "music", "sync"); err != nil {
+	if err := run(t, app, "music", "sync"); err != nil {
 		t.Fatal(err)
 	}
-	if store.writtenKey != trackCacheName || !reflect.DeepEqual(store.written, want) {
-		t.Fatalf("cache write = (%q, %#v), want tracks and %#v", store.writtenKey, store.written, want)
+	if got := cfg.caches[trackCacheName]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("track cache = %#v, want %#v", got, want)
 	}
 	if got := stderr.String(); got != "Synced 2 tracks.\n" {
 		t.Fatalf("stderr = %q, want sync summary", got)
@@ -104,30 +45,32 @@ func TestMusicSyncWritesTrackCache(t *testing.T) {
 }
 
 func TestMusicSyncKeepsEachTrackOnOneCacheLine(t *testing.T) {
-	client := &musicAPI{stubAPI: &stubAPI{}, saved: func(context.Context) ([]string, error) {
+	t.Parallel()
+	client := &fakeAPI{savedTracks: func(context.Context) ([]string, error) {
 		return []string{"id-1\tArtist\t/Album\t/01.\tTwo\nlines\r\nhere\r"}, nil
 	}}
-	store := &cacheConfig{stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"}}
-	app, _, _ := newMusicTestApp(client, store)
+	cfg := newFakeConfig(t)
+	app, _, _ := newTestApp(t, withAPI(client), withConfig(cfg))
 
-	if err := executeMusicTestCommand(app, "music", "sync"); err != nil {
+	if err := run(t, app, "music", "sync"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"id-1\tArtist\t/Album\t/01.\tTwo lines here "}
-	if !reflect.DeepEqual(store.written, want) {
-		t.Fatalf("cache write = %#v, want %#v", store.written, want)
+	if got := cfg.caches[trackCacheName]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("track cache = %#v, want %#v", got, want)
 	}
 }
 
 func TestMusicPlayWithIDSkipsSelectionAndCache(t *testing.T) {
+	t.Parallel()
 	var gotID string
-	client := &musicAPI{stubAPI: &stubAPI{}, play: func(_ context.Context, id string) error {
+	client := &fakeAPI{playTrack: func(_ context.Context, id string) error {
 		gotID = id
 		return nil
 	}}
-	app, _, _ := newMusicTestApp(client, nil)
+	app, _, _ := newTestApp(t, withAPI(client))
 
-	if err := executeMusicTestCommand(app, "music", "play", "--id", "spotify-id"); err != nil {
+	if err := run(t, app, "music", "play", "--id", "spotify-id"); err != nil {
 		t.Fatal(err)
 	}
 	if gotID != "spotify-id" {
@@ -135,104 +78,101 @@ func TestMusicPlayWithIDSkipsSelectionAndCache(t *testing.T) {
 	}
 }
 
-func TestMusicPlayMissingCache(t *testing.T) {
-	app, _, _ := newMusicTestApp(&musicAPI{stubAPI: &stubAPI{}}, nil)
+func TestMusicPlayRejectsEmptyID(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestApp(t)
+	if err := run(t, app, "music", "play", "--id", " "); err == nil || err.Error() != "track ID must not be empty" {
+		t.Fatalf("Execute() error = %v, want empty ID error", err)
+	}
+}
 
-	err := executeMusicTestCommand(app, "music", "play")
+func TestMusicPlayMissingCache(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestApp(t)
+
+	err := run(t, app, "music", "play")
 	if err == nil || err.Error() != "track cache is missing; run `sat music sync`" {
 		t.Fatalf("Execute() error = %v, want missing-cache guidance", err)
 	}
 }
 
 func TestMusicPlayUsesSelectorAndPassesQuery(t *testing.T) {
-	var gotItems []ui.Item
-	var gotOptions ui.SelectOptions
-	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
-		gotItems = items
-		gotOptions = opts
-		return items[1], nil
-	}
-
+	t.Parallel()
 	var gotID string
-	client := &musicAPI{stubAPI: &stubAPI{}, play: func(_ context.Context, id string) error {
+	client := &fakeAPI{playTrack: func(_ context.Context, id string) error {
 		gotID = id
 		return nil
 	}}
-	store := &cacheConfig{
-		stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"},
-		exists:     true,
-		lines: []string{
-			"one\tFirst artist\t/Album\t/01.\tFirst track",
-			"two\tSecond artist\t/Album\t/02.\tSecond track",
-		},
-	}
-	app, _, _ := newMusicTestApp(client, store)
-	app.Select = selectStub
-	app.IsTTY = func(any) bool { return true }
+	app, _, _ := newTestApp(t, withAPI(client), withConfig(trackConfig(t, twoTracks...)), withTTY())
+	var gotItems []ui.Item
+	var gotOpts ui.SelectOptions
+	app.Select = selectIndex(1, &gotItems, &gotOpts)
 
 	// "track" matches both entries, so the interactive selector must run.
-	if err := executeMusicTestCommand(app, "music", "play", "track"); err != nil {
+	if err := run(t, app, "music", "play", "track"); err != nil {
 		t.Fatal(err)
 	}
 	if gotID != "two" {
 		t.Fatalf("PlayTrack() ID = %q, want two", gotID)
 	}
-	if gotOptions.Query != "track" {
-		t.Fatalf("selector query = %q, want track", gotOptions.Query)
+	if gotOpts.Query != "track" || gotOpts.Title != "Saved tracks" {
+		t.Fatalf("selector options = %#v", gotOpts)
 	}
-	if len(gotItems) != 2 || gotItems[0].ID != "one" {
-		t.Fatalf("selector items = %#v", gotItems)
+	if !reflect.DeepEqual(gotItems, parseCacheLines(twoTracks)) {
+		t.Fatalf("selector items = %#v, want the cache in order", gotItems)
 	}
 }
 
 func TestMusicPlaySingleMatchSkipsSelectorWithoutTerminal(t *testing.T) {
+	t.Parallel()
 	var gotID string
-	client := &musicAPI{stubAPI: &stubAPI{}, play: func(_ context.Context, id string) error {
+	client := &fakeAPI{playTrack: func(_ context.Context, id string) error {
 		gotID = id
 		return nil
 	}}
-	store := &cacheConfig{
-		stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"},
-		exists:     true,
-		lines: []string{
-			"one\tFirst artist\t/Album\t/01.\tFirst track",
-			"two\tSecond artist\t/Album\t/02.\tSecond track",
-		},
-	}
-	app, _, _ := newMusicTestApp(client, store)
+	// Streams are not terminals and Select fails the test if it runs, so
+	// only the non-interactive fast path can succeed here.
+	app, _, _ := newTestApp(t, withAPI(client), withConfig(trackConfig(t, twoTracks...)))
 
-	// Streams are buffers (not a terminal) and App.Select is the real one,
-	// so only the non-interactive fast path can succeed here.
-	if err := executeMusicTestCommand(app, "music", "play", "second", "track"); err != nil {
+	if err := run(t, app, "music", "play", "second", "track"); err != nil {
 		t.Fatal(err)
 	}
 	if gotID != "two" {
 		t.Fatalf("PlayTrack() ID = %q, want two", gotID)
 	}
 
-	err := executeMusicTestCommand(app, "music", "play", "track")
-	if !errors.Is(err, errSelectorNeedsTerminal) {
+	if err := run(t, app, "music", "play", "track"); !errors.Is(err, errSelectorNeedsTerminal) {
 		t.Fatalf("ambiguous query without terminal error = %v", err)
 	}
 }
 
+func TestMusicPlayNoMatchFails(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks...)))
+	if err := run(t, app, "music", "play", "zzz"); err == nil || err.Error() != `no items match "zzz"` {
+		t.Fatalf("Execute() error = %v, want no match", err)
+	}
+}
+
 func TestMusicControlsMapActions(t *testing.T) {
+	t.Parallel()
 	tests := map[string]api.PlaybackAction{
 		"pause":    api.Pause,
 		"resume":   api.Play,
 		"next":     api.Next,
 		"previous": api.Previous,
 	}
-	for command, wantAction := range tests {
-		t.Run(command, func(t *testing.T) {
+	for name, wantAction := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			var gotAction api.PlaybackAction
-			client := &musicAPI{stubAPI: &stubAPI{}, control: func(_ context.Context, action api.PlaybackAction) error {
+			client := &fakeAPI{controlPlayback: func(_ context.Context, action api.PlaybackAction) error {
 				gotAction = action
 				return nil
 			}}
-			app, _, _ := newMusicTestApp(client, nil)
+			app, _, _ := newTestApp(t, withAPI(client))
 
-			if err := executeMusicTestCommand(app, "music", command); err != nil {
+			if err := run(t, app, "music", name); err != nil {
 				t.Fatal(err)
 			}
 			if gotAction != wantAction {
@@ -243,47 +183,51 @@ func TestMusicControlsMapActions(t *testing.T) {
 }
 
 func TestMusicSpotifyErrorPropagates(t *testing.T) {
+	t.Parallel()
 	wantErr := &api.SpotifyError{Message: "No active device"}
-	client := &musicAPI{stubAPI: &stubAPI{}, play: func(context.Context, string) error {
+	client := &fakeAPI{playTrack: func(context.Context, string) error {
 		return wantErr
 	}}
-	app, _, _ := newMusicTestApp(client, nil)
+	app, _, _ := newTestApp(t, withAPI(client))
 
-	err := executeMusicTestCommand(app, "music", "play", "--id", "track")
-	if !errors.Is(err, wantErr) {
+	if err := run(t, app, "music", "play", "--id", "track"); !errors.Is(err, wantErr) {
 		t.Fatalf("Execute() error = %v, want Spotify error", err)
 	}
 }
 
 func TestMusicCancellationReturnsExitCode130(t *testing.T) {
-	selectStub := func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
+	t.Parallel()
+	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks[0])), withTTY())
+	app.Select = func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
 		return ui.Item{}, ui.ErrCancelled
 	}
-	store := &cacheConfig{
-		stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"},
-		exists:     true,
-		lines:      []string{"one\tArtist\t/Album\t/01.\tTrack"},
-	}
-	app, _, _ := newMusicTestApp(&musicAPI{stubAPI: &stubAPI{}}, store)
-	app.Select = selectStub
-	app.IsTTY = func(any) bool { return true }
 
-	err := executeMusicTestCommand(app, "music", "play")
+	err := run(t, app, "music", "play")
 	var exitError ExitError
 	if !errors.As(err, &exitError) || exitError.Code != 130 || !errors.Is(err, ui.ErrCancelled) {
 		t.Fatalf("Execute() error = %#v, want cancellation exit code 130", err)
 	}
 }
 
-func TestMusicSelectionRequiresTerminalWithoutHook(t *testing.T) {
-	store := &cacheConfig{
-		stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"},
-		exists:     true,
-		lines:      []string{"one\tArtist\t/Album\t/01.\tTrack"},
+func TestMusicSelectorErrorIsWrapped(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("tty gone")
+	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks[0])), withTTY())
+	app.Select = func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
+		return ui.Item{}, wantErr
 	}
-	app, _, _ := newMusicTestApp(&musicAPI{stubAPI: &stubAPI{}}, store)
 
-	err := executeMusicTestCommand(app, "music", "play")
+	err := run(t, app, "music", "play")
+	if !errors.Is(err, wantErr) || err.Error() != "select item: tty gone" {
+		t.Fatalf("Execute() error = %v, want wrapped selector error", err)
+	}
+}
+
+func TestMusicSelectionRequiresTerminal(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestApp(t, withConfig(trackConfig(t, twoTracks[0])))
+
+	err := run(t, app, "music", "play")
 	if err == nil || err.Error() != "interactive selection requires a terminal on stdin and stdout" {
 		t.Fatalf("Execute() error = %v, want terminal requirement", err)
 	}

@@ -11,99 +11,80 @@ import (
 	"github.com/mantas6/sat-cli/internal/ui"
 )
 
-type dashboardAPI struct {
-	*stubAPI
-	dashboard func(context.Context) (string, error)
-}
-
-func (d *dashboardAPI) Dashboard(ctx context.Context) (string, error) {
-	if d.dashboard == nil {
-		return "", nil
-	}
-	return d.dashboard(ctx)
+func dashboardText(text string) *fakeAPI {
+	return &fakeAPI{dashboard: func(context.Context) (string, error) { return text, nil }}
 }
 
 func TestDashboardOneShotPrintsResponse(t *testing.T) {
-	client := &dashboardAPI{stubAPI: &stubAPI{}, dashboard: func(context.Context) (string, error) {
-		return "dashboard text", nil
-	}}
-	app, output := newWeatherNotifyTestApp(client)
-
-	if err := executeWeatherNotifyTestCommand(app, "dashboard"); err != nil {
-		t.Fatal(err)
-	}
-	if got := output.String(); got != "dashboard text\n" {
-		t.Fatalf("output = %q, want %q", got, "dashboard text\n")
-	}
-}
-
-func TestDashboardOneShotPreservesTrailingNewline(t *testing.T) {
-	client := &dashboardAPI{stubAPI: &stubAPI{}, dashboard: func(context.Context) (string, error) {
-		return "dashboard text\n", nil
-	}}
-	app, output := newWeatherNotifyTestApp(client)
-
-	if err := executeWeatherNotifyTestCommand(app, "dashboard"); err != nil {
-		t.Fatal(err)
-	}
-	if got := output.String(); got != "dashboard text\n" {
-		t.Fatalf("output = %q, want one trailing newline", got)
+	t.Parallel()
+	for _, text := range []string{"dashboard text", "dashboard text\n"} {
+		app, stdout, _ := newTestApp(t, withAPI(dashboardText(text)))
+		if err := run(t, app, "dashboard"); err != nil {
+			t.Fatal(err)
+		}
+		if got := stdout.String(); got != "dashboard text\n" {
+			t.Fatalf("output for %q = %q, want one trailing newline", text, got)
+		}
 	}
 }
 
 func TestDashboardOneShotErrorPropagates(t *testing.T) {
+	t.Parallel()
 	wantErr := errors.New("dashboard failed")
-	client := &dashboardAPI{stubAPI: &stubAPI{}, dashboard: func(context.Context) (string, error) {
+	client := &fakeAPI{dashboard: func(context.Context) (string, error) {
 		return "", wantErr
 	}}
-	app, _ := newWeatherNotifyTestApp(client)
+	app, _, _ := newTestApp(t, withAPI(client))
 
-	err := executeWeatherNotifyTestCommand(app, "dashboard")
-	if !errors.Is(err, wantErr) {
+	if err := run(t, app, "dashboard"); !errors.Is(err, wantErr) {
 		t.Fatalf("Execute() error = %v, want %v", err, wantErr)
 	}
 }
 
 func TestDashboardFollowIntervalsAndFetcher(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
 		want time.Duration
 	}{
 		{name: "flag without value", args: []string{"dashboard", "--follow"}, want: 5 * time.Second},
+		{name: "alias and short flag", args: []string{"dash", "-f"}, want: 5 * time.Second},
 		{name: "positional value", args: []string{"dashboard", "--follow", "10s"}, want: 10 * time.Second},
 		{name: "equals value", args: []string{"dashboard", "--follow=10s"}, want: 10 * time.Second},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-
+			t.Parallel()
 			apiCalls := 0
-			client := &dashboardAPI{stubAPI: &stubAPI{}, dashboard: func(context.Context) (string, error) {
+			client := &fakeAPI{dashboard: func(ctx context.Context) (string, error) {
 				apiCalls++
+				if _, ok := ctx.Deadline(); !ok {
+					t.Error("Dashboard() context has no request timeout")
+				}
 				return "latest", nil
 			}}
-			var gotInterval time.Duration
-			followStub := func(_ context.Context, _ io.Reader, _ io.Writer, fetch ui.Fetcher, opts ui.DashboardOptions) error {
-				gotInterval = opts.Interval
-				text, err := fetch(context.Background())
+			app, _, _ := newTestApp(t, withAPI(client), withTTY())
+			app.TermSize = func() (int, int, bool) { return 120, 40, true }
+			var gotOpts ui.DashboardOptions
+			app.Follow = func(ctx context.Context, _ io.Reader, _ io.Writer, fetch ui.Fetcher, opts ui.DashboardOptions) error {
+				gotOpts = opts
+				text, err := fetch(ctx)
 				if err != nil {
 					return err
 				}
 				if text != "latest" {
-					t.Fatalf("fetch() = %q, want latest", text)
+					t.Errorf("fetch() = %q, want latest", text)
 				}
 				return nil
 			}
-			app, _ := newWeatherNotifyTestApp(client)
-			app.Follow = followStub
-			app.IsTTY = func(any) bool { return true }
 
-			if err := executeWeatherNotifyTestCommand(app, test.args...); err != nil {
+			if err := run(t, app, test.args...); err != nil {
 				t.Fatal(err)
 			}
-			if gotInterval != test.want {
-				t.Fatalf("follow interval = %v, want %v", gotInterval, test.want)
+			if want := (ui.DashboardOptions{Interval: test.want, Width: 120, Height: 40}); gotOpts != want {
+				t.Fatalf("follow options = %#v, want %#v", gotOpts, want)
 			}
 			if apiCalls != 1 {
 				t.Fatalf("Dashboard() calls = %d, want 1", apiCalls)
@@ -113,27 +94,34 @@ func TestDashboardFollowIntervalsAndFetcher(t *testing.T) {
 }
 
 func TestDashboardFollowRejectsInvalidIntervals(t *testing.T) {
-	tests := [][]string{
-		{"dashboard", "--follow", "invalid"},
-		{"dashboard", "--follow=0s"},
-		{"dashboard", "--follow=-1s"},
-		{"dashboard", "10s"},
+	t.Parallel()
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"dashboard", "--follow", "invalid"}, `invalid dashboard follow interval "invalid"`},
+		{[]string{"dashboard", "--follow=0s"}, "dashboard follow interval must be greater than zero"},
+		{[]string{"dashboard", "--follow=-1s"}, "dashboard follow interval must be greater than zero"},
+		{[]string{"dashboard", "10s"}, "dashboard interval requires --follow"},
+		{[]string{"dashboard", "--follow", "1s", "2s"}, "accepts at most 1 arg(s), received 2"},
 	}
-	for _, args := range tests {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			app, _ := newWeatherNotifyTestApp(&dashboardAPI{stubAPI: &stubAPI{}})
-			if err := executeWeatherNotifyTestCommand(app, args...); err == nil {
-				t.Fatal("Execute() error = nil, want invalid interval error")
+	for _, test := range tests {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			t.Parallel()
+			app, _, _ := newTestApp(t, withTTY())
+			if err := run(t, app, test.args...); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Execute() error = %v, want %q", err, test.want)
 			}
 		})
 	}
 }
 
-func TestDashboardFollowRequiresTerminalWithoutStub(t *testing.T) {
-	app, _ := newWeatherNotifyTestApp(&dashboardAPI{stubAPI: &stubAPI{}})
+func TestDashboardFollowRequiresTerminal(t *testing.T) {
+	t.Parallel()
+	// newTestApp streams are not terminals and Follow fails the test if run.
+	app, _, _ := newTestApp(t)
 
-	err := executeWeatherNotifyTestCommand(app, "dashboard", "--follow")
-	if !errors.Is(err, errDashboardNeedsTerminal) {
+	if err := run(t, app, "dashboard", "--follow"); !errors.Is(err, errDashboardNeedsTerminal) {
 		t.Fatalf("Execute() error = %v, want terminal requirement", err)
 	}
 }

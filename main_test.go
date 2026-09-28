@@ -12,6 +12,7 @@ import (
 )
 
 func TestExitCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		err  error
@@ -25,6 +26,7 @@ func TestExitCode(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			if got := exitCode(test.err); got != test.want {
 				t.Fatalf("exitCode() = %d, want %d", got, test.want)
 			}
@@ -33,6 +35,7 @@ func TestExitCode(t *testing.T) {
 }
 
 func TestSilent(t *testing.T) {
+	t.Parallel()
 	processErr := exec.Command("sh", "-c", "exit 3").Run()
 	var exitErr *exec.ExitError
 	if !errors.As(processErr, &exitErr) {
@@ -54,6 +57,7 @@ func TestSilent(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			if got := silent(test.err); got != test.want {
 				t.Fatalf("silent(%v) = %v, want %v", test.err, got, test.want)
 			}
