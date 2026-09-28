@@ -37,8 +37,10 @@ go build -trimpath -o sat ./cmd/sat
 go install github.com/mantas6/sat-cli/cmd/sat@latest
 ```
 
-Requires Go and, for `sat article edit|new`, Neovim. The version shown by
-`sat --version` can be set with `-ldflags "-X main.version=..."`.
+Requires Go and, for `sat article edit|new`, Neovim. `sat --version` prints the
+value set with `-ldflags "-X main.version=..."`, else the module version
+recorded by the Go toolchain (the tag or pseudo-version, `+dirty` for modified
+checkouts), else the VCS revision, else `dev`.
 
 ## Configuration
 

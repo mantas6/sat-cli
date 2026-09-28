@@ -7,14 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/mantas6/sat-cli/internal/command"
 	"github.com/mantas6/sat-cli/internal/ui"
 )
-
-// version is overridden at build time with -ldflags "-X main.version=...".
-var version = "dev"
 
 func main() {
 	ctx, stop := notifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -24,7 +22,8 @@ func main() {
 	if err != nil {
 		exit(err, nil)
 	}
-	app.Version = version
+	info, ok := debug.ReadBuildInfo()
+	app.Version = resolveVersion(version, info, ok)
 	root := command.NewRootCommand(app)
 
 	if err := root.ExecuteContext(ctx); err != nil {
