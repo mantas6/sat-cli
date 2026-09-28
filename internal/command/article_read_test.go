@@ -36,9 +36,7 @@ func executeArticleTestCommand(app *App, args ...string) error {
 }
 
 func TestArticleReadWithIDSkipsSelector(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
-	runSelector = func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
 		t.Fatal("selector called with --id")
 		return ui.Item{}, nil
 	}
@@ -49,6 +47,7 @@ func TestArticleReadWithIDSkipsSelector(t *testing.T) {
 		return api.ArticleContents{Contents: "contents"}, nil
 	}}
 	app, _ := newArticleTestApp(client, nil)
+	app.Select = selectStub
 	if err := executeArticleTestCommand(app, "article", "read", "--id", "27"); err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +57,8 @@ func TestArticleReadWithIDSkipsSelector(t *testing.T) {
 }
 
 func TestArticleReadPassesJoinedQueryToSelector(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
 	var gotQuery string
-	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
 		gotQuery = opts.Query
 		return items[0], nil
 	}
@@ -75,6 +72,9 @@ func TestArticleReadPassesJoinedQueryToSelector(t *testing.T) {
 		lines:      []string{"1\tShared article first", "2\tShared article second"},
 	}
 	app, _ := newArticleTestApp(client, store)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
+	app.Page = func(context.Context, io.Reader, io.Writer, string, ui.PageOptions) error { return nil }
 	if err := executeArticleTestCommand(app, "article", "read", "Shared", "article"); err != nil {
 		t.Fatal(err)
 	}
@@ -97,9 +97,7 @@ func TestArticleReadWritesExactRawContentForNonTerminal(t *testing.T) {
 }
 
 func TestArticleReadRawFlagBypassesPagerOnTerminal(t *testing.T) {
-	previous := runPager
-	t.Cleanup(func() { runPager = previous })
-	runPager = func(context.Context, io.Reader, io.Writer, string, ui.PageOptions) error {
+	pageStub := func(context.Context, io.Reader, io.Writer, string, ui.PageOptions) error {
 		t.Fatal("pager called with --raw")
 		return nil
 	}
@@ -113,8 +111,10 @@ func TestArticleReadRawFlagBypassesPagerOnTerminal(t *testing.T) {
 		return api.ArticleContents{Contents: "raw\n"}, nil
 	}}
 	app, _ := newArticleTestApp(client, nil)
+	app.Page = pageStub
+	app.IsTTY = func(any) bool { return true }
 	app.Stdout = writer
-	app.IsTerminal = func(int) bool { return true }
+	app.IsTTY = func(any) bool { return true }
 	if err := executeArticleTestCommand(app, "article", "read", "--id", "1", "--raw"); err != nil {
 		t.Fatal(err)
 	}
@@ -131,11 +131,9 @@ func TestArticleReadRawFlagBypassesPagerOnTerminal(t *testing.T) {
 }
 
 func TestArticleReadInvokesPagerForTerminal(t *testing.T) {
-	previous := runPager
-	t.Cleanup(func() { runPager = previous })
 	var gotContent string
 	var gotOptions ui.PageOptions
-	runPager = func(_ context.Context, _ io.Reader, _ io.Writer, content string, opts ui.PageOptions) error {
+	pageStub := func(_ context.Context, _ io.Reader, _ io.Writer, content string, opts ui.PageOptions) error {
 		gotContent = content
 		gotOptions = opts
 		return nil
@@ -145,9 +143,11 @@ func TestArticleReadInvokesPagerForTerminal(t *testing.T) {
 		return api.ArticleContents{Contents: "# Markdown"}, nil
 	}}
 	app, _ := newArticleTestApp(client, nil)
+	app.Page = pageStub
+	app.IsTTY = func(any) bool { return true }
 	app.Stdout = os.Stdout
-	app.IsTerminal = func(int) bool { return true }
-	app.TerminalSize = func(int) (int, int, error) { return 100, 35, nil }
+	app.IsTTY = func(any) bool { return true }
+	app.TermSize = func() (int, int, bool) { return 100, 35, true }
 	if err := executeArticleTestCommand(app, "article", "read", "--id", "1"); err != nil {
 		t.Fatal(err)
 	}

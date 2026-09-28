@@ -10,18 +10,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 const maxURLPromptAttempts = 3
-
-// These are package-level vars so tests can inject fakes for the terminal
-// interactions that would otherwise require a real TTY.
-var (
-	readPassword     = term.ReadPassword
-	getTerminalState = term.GetState
-	restoreTerminal  = term.Restore
-)
 
 func newLoginCommand(app *App) *cobra.Command {
 	var replaceURL bool
@@ -81,7 +72,7 @@ type loginPrompter struct {
 }
 
 func (p loginPrompter) promptURL() error {
-	interactive := p.stdinIsTerminal()
+	interactive := p.app.IsTTY(p.app.Stdin)
 	attempts := 1
 	if interactive {
 		attempts = maxURLPromptAttempts
@@ -111,7 +102,7 @@ func (p loginPrompter) promptURL() error {
 
 func (p loginPrompter) promptToken() error {
 	var value string
-	if file, ok := p.app.Stdin.(*os.File); ok && p.isTerminal(int(file.Fd())) {
+	if file, ok := p.app.Stdin.(*os.File); ok && p.app.IsTTY(file) {
 		if _, err := fmt.Fprint(p.app.Stderr, "Token: "); err != nil {
 			return err
 		}
@@ -143,13 +134,13 @@ func (p loginPrompter) promptToken() error {
 // stuck in the goroutine, capture the terminal state up front and restore it
 // ourselves when the context is cancelled.
 func (p loginPrompter) readHiddenToken(fd int) ([]byte, error) {
-	state, stateErr := getTerminalState(fd)
+	state, stateErr := p.app.TerminalState(fd)
 	password, err := readWithContext(p.ctx, func() ([]byte, error) {
-		return readPassword(fd)
+		return p.app.ReadPassword(fd)
 	})
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		if stateErr == nil {
-			_ = restoreTerminal(fd, state)
+			_ = p.app.RestoreTerminal(fd, state)
 		}
 	}
 	return password, err
@@ -190,13 +181,4 @@ func readWithContext[T any](ctx context.Context, read func() (T, error)) (T, err
 	case r := <-ch:
 		return r.value, r.err
 	}
-}
-
-func (p loginPrompter) stdinIsTerminal() bool {
-	file, ok := p.app.Stdin.(*os.File)
-	return ok && p.isTerminal(int(file.Fd()))
-}
-
-func (p loginPrompter) isTerminal(fd int) bool {
-	return p.app.IsTerminal != nil && p.app.IsTerminal(fd)
 }

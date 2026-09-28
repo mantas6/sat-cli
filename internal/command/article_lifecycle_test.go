@@ -107,14 +107,13 @@ func newArticleLifecycleApp(t *testing.T, client APIClient) (*App, *config.Store
 		Stderr: stderr,
 		Now:    time.Now,
 	}
+	normalizeApp(app)
 	return app, store, stdout, stderr
 }
 
 func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
 	var selected []ui.Item
-	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, options ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, options ui.SelectOptions) (ui.Item, error) {
 		selected = append([]ui.Item(nil), items...)
 		if options.Title != "Journals" {
 			t.Fatalf("selector title = %q", options.Title)
@@ -133,6 +132,8 @@ func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
 		return api.Article{}, nil
 	}}
 	app, store, _, _ := newArticleLifecycleApp(t, client)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
 	if err := store.WriteCacheLines(articleCacheName, []string{"1\tCached"}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,9 +157,7 @@ func TestArticleAssignFetchesJournalsAndInvalidatesArticles(t *testing.T) {
 }
 
 func TestArticleAssignUsesReturnedJournalOrder(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
-	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, _ ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, _ ui.SelectOptions) (ui.Item, error) {
 		return items[0], nil
 	}
 
@@ -171,6 +170,8 @@ func TestArticleAssignUsesReturnedJournalOrder(t *testing.T) {
 		return api.Article{}, nil
 	}}
 	app, store, _, _ := newArticleLifecycleApp(t, client)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
 
 	if err := assignArticle(context.Background(), &cobra.Command{}, app, client, 1, ""); err != nil {
 		t.Fatal(err)

@@ -145,11 +145,9 @@ func TestMusicPlayMissingCache(t *testing.T) {
 }
 
 func TestMusicPlayUsesSelectorAndPassesQuery(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
 	var gotItems []ui.Item
 	var gotOptions ui.SelectOptions
-	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
 		gotItems = items
 		gotOptions = opts
 		return items[1], nil
@@ -169,6 +167,8 @@ func TestMusicPlayUsesSelectorAndPassesQuery(t *testing.T) {
 		},
 	}
 	app, _, _ := newMusicTestApp(client, store)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
 
 	// "track" matches both entries, so the interactive selector must run.
 	if err := executeMusicTestCommand(app, "music", "play", "track"); err != nil {
@@ -201,7 +201,7 @@ func TestMusicPlaySingleMatchSkipsSelectorWithoutTerminal(t *testing.T) {
 	}
 	app, _, _ := newMusicTestApp(client, store)
 
-	// Streams are buffers (not a terminal) and runSelector is the real one,
+	// Streams are buffers (not a terminal) and App.Select is the real one,
 	// so only the non-interactive fast path can succeed here.
 	if err := executeMusicTestCommand(app, "music", "play", "second", "track"); err != nil {
 		t.Fatal(err)
@@ -256,9 +256,7 @@ func TestMusicSpotifyErrorPropagates(t *testing.T) {
 }
 
 func TestMusicCancellationReturnsExitCode130(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
-	runSelector = func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
 		return ui.Item{}, ui.ErrCancelled
 	}
 	store := &cacheConfig{
@@ -267,6 +265,8 @@ func TestMusicCancellationReturnsExitCode130(t *testing.T) {
 		lines:      []string{"one\tArtist\t/Album\t/01.\tTrack"},
 	}
 	app, _, _ := newMusicTestApp(&musicAPI{stubAPI: &stubAPI{}}, store)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
 
 	err := executeMusicTestCommand(app, "music", "play")
 	var exitError ExitError
@@ -276,9 +276,6 @@ func TestMusicCancellationReturnsExitCode130(t *testing.T) {
 }
 
 func TestMusicSelectionRequiresTerminalWithoutHook(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
-	runSelector = ui.Select
 	store := &cacheConfig{
 		stubConfig: &stubConfig{baseURL: "https://satellite.test", token: "secret"},
 		exists:     true,

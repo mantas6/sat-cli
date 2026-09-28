@@ -3,9 +3,10 @@ package command
 
 import "github.com/spf13/cobra"
 
-// NewRootCommand builds the sat command tree. Register future commands with
-// root.AddCommand(newXCommand(app)); each constructor remains easy to test.
-// app must not be nil; use NewDefaultApp for the operating-system wiring.
+// NewRootCommand builds the sat command tree. New top-level commands are added
+// to the AddCommand list below; each constructor remains easy to test. app must
+// not be nil; use NewDefaultApp for the operating-system wiring. Nil boundaries
+// are filled with their operating-system defaults.
 func NewRootCommand(app *App) *cobra.Command {
 	normalizeApp(app)
 
@@ -31,18 +32,16 @@ Environment:
 	root.SetErr(app.Stderr)
 	root.SetVersionTemplate("sat {{.Version}}\n")
 
-	for _, constructor := range subcommands {
-		root.AddCommand(constructor(app))
-	}
+	root.AddCommand(
+		newArticleCommand(app),
+		newArlCommand(app),
+		newAuthCommand(app),
+		newDashboardCommand(app),
+		newMusicCommand(app),
+		newNotifyCommand(app),
+		newRunCommand(app),
+		newWeatherCommand(app),
+	)
 
 	return root
-}
-
-// subcommands lists every top-level command constructor. Each command file
-// registers itself from an init function via registerCommand so that files
-// can be added without editing this one.
-var subcommands []func(*App) *cobra.Command
-
-func registerCommand(constructor func(*App) *cobra.Command) {
-	subcommands = append(subcommands, constructor)
 }

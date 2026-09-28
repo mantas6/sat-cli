@@ -119,33 +119,25 @@ func TestLoginTokenPromptCancels(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 
-	restoreReadPassword := readPassword
-	readPassword = func(int) ([]byte, error) {
-		close(started)
-		<-release
-		return nil, io.EOF
-	}
-	defer func() { readPassword = restoreReadPassword }()
-
-	restoreGetState := getTerminalState
-	getTerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
-	defer func() { getTerminalState = restoreGetState }()
-
 	restored := make(chan struct{}, 1)
-	restoreRestore := restoreTerminal
-	restoreTerminal = func(int, *term.State) error {
-		restored <- struct{}{}
-		return nil
-	}
-	defer func() { restoreTerminal = restoreRestore }()
-
 	app := &App{
-		Config:     config,
-		Stdin:      stdin,
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
-		IsTerminal: func(int) bool { return true },
+		Config: config,
+		Stdin:  stdin,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		IsTTY:  func(any) bool { return true },
+		ReadPassword: func(int) ([]byte, error) {
+			close(started)
+			<-release
+			return nil, io.EOF
+		},
+		TerminalState: func(int) (*term.State, error) { return &term.State{}, nil },
+		RestoreTerminal: func(int, *term.State) error {
+			restored <- struct{}{}
+			return nil
+		},
 	}
+	normalizeApp(app)
 	command := newLoginCommand(app)
 	command.SetArgs(nil)
 
@@ -184,25 +176,17 @@ func TestLoginTokenPromptEOFReturnsMissing(t *testing.T) {
 	stdin, cleanupStdin := terminalFile(t)
 	defer cleanupStdin()
 
-	restoreReadPassword := readPassword
-	readPassword = func(int) ([]byte, error) { return nil, io.EOF }
-	defer func() { readPassword = restoreReadPassword }()
-
-	restoreGetState := getTerminalState
-	getTerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
-	defer func() { getTerminalState = restoreGetState }()
-
-	restoreRestore := restoreTerminal
-	restoreTerminal = func(int, *term.State) error { return nil }
-	defer func() { restoreTerminal = restoreRestore }()
-
 	app := &App{
-		Config:     config,
-		Stdin:      stdin,
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
-		IsTerminal: func(int) bool { return true },
+		Config:          config,
+		Stdin:           stdin,
+		Stdout:          &bytes.Buffer{},
+		Stderr:          &bytes.Buffer{},
+		IsTTY:           func(any) bool { return true },
+		ReadPassword:    func(int) ([]byte, error) { return nil, io.EOF },
+		TerminalState:   func(int) (*term.State, error) { return &term.State{}, nil },
+		RestoreTerminal: func(int, *term.State) error { return nil },
 	}
+	normalizeApp(app)
 	command := newLoginCommand(app)
 	command.SetArgs(nil)
 
@@ -233,12 +217,13 @@ func TestLoginURLPromptCancels(t *testing.T) {
 	})
 
 	app := &App{
-		Config:     config,
-		Stdin:      reader,
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
-		IsTerminal: func(int) bool { return false },
+		Config: config,
+		Stdin:  reader,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		IsTTY:  func(any) bool { return false },
 	}
+	normalizeApp(app)
 	command := newLoginCommand(app)
 	command.SetArgs(nil)
 
@@ -266,7 +251,7 @@ func TestLoginURLPromptCancels(t *testing.T) {
 }
 
 // terminalFile returns a real *os.File (the read end of a pipe) so the hidden
-// token path is taken; readPassword itself is stubbed, so nothing is read.
+// token path is taken; App.ReadPassword itself is stubbed, so nothing is read.
 func terminalFile(t *testing.T) (*os.File, func()) {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -286,12 +271,13 @@ func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
 func executeLogin(config *memoryConfig, input string, args ...string) (string, error) {
 	var stderr bytes.Buffer
 	app := &App{
-		Config:     config,
-		Stdin:      strings.NewReader(input),
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &stderr,
-		IsTerminal: func(int) bool { return false },
+		Config: config,
+		Stdin:  strings.NewReader(input),
+		Stdout: &bytes.Buffer{},
+		Stderr: &stderr,
+		IsTTY:  func(any) bool { return false },
 	}
+	normalizeApp(app)
 	command := newLoginCommand(app)
 	command.SetArgs(args)
 	err := command.Execute()

@@ -9,10 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	registerCommand(newAuthCommand)
-}
-
 func newAuthCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "auth",
@@ -67,9 +63,6 @@ func printAuthStatus(cmd *cobra.Command, app *App) error {
 // envSuffix returns a " (from NAME)" annotation when the named environment
 // override is set, and an empty string otherwise.
 func envSuffix(app *App, name string) string {
-	if app.Getenv == nil {
-		return ""
-	}
 	if strings.TrimSpace(app.Getenv(name)) == "" {
 		return ""
 	}

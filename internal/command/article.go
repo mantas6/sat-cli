@@ -14,11 +14,6 @@ import (
 
 const articleCacheName = "list"
 
-func init() {
-	registerCommand(newArticleCommand)
-	registerCommand(newArlCommand)
-}
-
 func newArticleCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "article",

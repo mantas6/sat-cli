@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -32,10 +31,6 @@ func (t sshTarget) remoteDir() string {
 		return defaultRemoteDir
 	}
 	return shellQuote(t.Root)
-}
-
-func init() {
-	registerCommand(newRunCommand)
 }
 
 func newRunCommand(app *App) *cobra.Command {
@@ -71,9 +66,7 @@ func newRunCommand(app *App) *cobra.Command {
 			// ERROR keeps connection and authentication failures visible while
 			// hiding banners and warnings.
 			sshArgs := []string{"-o", "LogLevel=ERROR"}
-			stdin, stdinOK := app.Stdin.(*os.File)
-			stdout, stdoutOK := app.Stdout.(*os.File)
-			if stdinOK && stdoutOK && app.IsTerminal(int(stdin.Fd())) && app.IsTerminal(int(stdout.Fd())) {
+			if app.interactive() {
 				sshArgs = append(sshArgs, "-t")
 			}
 

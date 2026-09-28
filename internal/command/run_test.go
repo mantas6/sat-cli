@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
@@ -161,15 +160,15 @@ func TestSSHCommandOmitsArtisanArgumentsWhenEmpty(t *testing.T) {
 
 func TestSSHCommandAddsTTYOnlyForTerminalFiles(t *testing.T) {
 	tests := []struct {
-		name   string
-		stdin  io.Reader
-		stdout io.Writer
-		term   bool
-		want   bool
+		name      string
+		stdinTTY  bool
+		stdoutTTY bool
+		want      bool
 	}{
-		{name: "terminal files", stdin: os.Stdin, stdout: os.Stdout, term: true, want: true},
-		{name: "non-terminal files", stdin: os.Stdin, stdout: os.Stdout, term: false, want: false},
-		{name: "non-file streams", stdin: &bytes.Buffer{}, stdout: &bytes.Buffer{}, term: true, want: false},
+		{name: "both terminals", stdinTTY: true, stdoutTTY: true, want: true},
+		{name: "stdin only", stdinTTY: true, stdoutTTY: false, want: false},
+		{name: "stdout only", stdinTTY: false, stdoutTTY: true, want: false},
+		{name: "no terminals", want: false},
 	}
 
 	for _, test := range tests {
@@ -179,9 +178,12 @@ func TestSSHCommandAddsTTYOnlyForTerminalFiles(t *testing.T) {
 				"REMOTE_HOST": "server",
 				"REMOTE_ROOT": "/srv/current",
 			})
-			app.Stdin = test.stdin
-			app.Stdout = test.stdout
-			app.IsTerminal = func(int) bool { return test.term }
+			app.IsTTY = func(stream any) bool {
+				if stream == app.Stdin {
+					return test.stdinTTY
+				}
+				return stream == app.Stdout && test.stdoutTTY
+			}
 
 			if err := executeRunTestCommand(app, "run"); err != nil {
 				t.Fatal(err)
@@ -252,16 +254,12 @@ func TestExecRunnerForwardsCancellationAsSignal(t *testing.T) {
 		t.Skip("signal forwarding is unix-specific")
 	}
 
-	original := termGracePeriod
-	termGracePeriod = 100 * time.Millisecond
-	t.Cleanup(func() { termGracePeriod = original })
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	result := make(chan error, 1)
 	go func() {
-		result <- ExecRunner{}.Run(ctx, "sleep", []string{"10"}, nil, io.Discard, io.Discard)
+		result <- ExecRunner{Grace: 100 * time.Millisecond}.Run(ctx, "sleep", []string{"10"}, nil, io.Discard, io.Discard)
 	}()
 
 	time.AfterFunc(50*time.Millisecond, cancel)

@@ -3,14 +3,11 @@ package command
 import (
 	"errors"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/mantas6/sat-cli/internal/ui"
 	"github.com/spf13/cobra"
 )
-
-var runPager = ui.Page
 
 func newArticleReadCommand(app *App) *cobra.Command {
 	var id string
@@ -53,19 +50,13 @@ func newArticleReadCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			output, terminal := app.Stdout.(*os.File)
-			if raw || !terminal || !app.IsTerminal(int(output.Fd())) {
+			if raw || !app.IsTTY(app.Stdout) {
 				return writeArticleContents(app.Stdout, article.Contents)
 			}
 
-			width, height, err := app.TerminalSize(int(output.Fd()))
-			if err != nil || width <= 0 {
-				width = 80
-			}
-			if err != nil || height <= 0 {
-				height = 24
-			}
-			return runPager(cmd.Context(), app.Stdin, app.Stdout, article.Contents, ui.PageOptions{
+			// An unknown size stays zero and the pager falls back to 80x24.
+			width, height, _ := app.TermSize()
+			return app.Page(cmd.Context(), app.Stdin, app.Stdout, article.Contents, ui.PageOptions{
 				Title:  "Article",
 				Width:  width,
 				Height: height,

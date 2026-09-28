@@ -12,6 +12,7 @@ import (
 
 func executeAuthStatus(app *App) (string, error) {
 	var out bytes.Buffer
+	normalizeApp(app)
 	command := newAuthCommand(app)
 	command.SetArgs(nil)
 	command.SetOut(&out)

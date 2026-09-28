@@ -11,19 +11,18 @@ import (
 )
 
 // ExecRunner runs child processes with the standard os/exec package.
-type ExecRunner struct{}
-
-// termGracePeriod is how long ExecRunner waits after a context cancellation
-// (which sends SIGTERM) before hard-killing the child. It is a package-level
-// variable so tests can shorten it.
-var termGracePeriod = 2 * time.Second
+type ExecRunner struct {
+	// Grace is how long Run waits after a context cancellation (which sends
+	// SIGTERM) before hard-killing the child; zero selects 2 seconds.
+	Grace time.Duration
+}
 
 // Run executes one child process attached to the provided streams. Instead of
 // hard-killing the child when ctx is cancelled, Run forwards os.Interrupt and
 // SIGTERM to the process and, on cancellation, sends SIGTERM followed by a
 // Kill after a short grace period. This lets interactive children (e.g. ssh)
 // tear down cleanly. The *exec.ExitError from Wait is returned unchanged.
-func (ExecRunner) Run(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func (r ExecRunner) Run(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	process := exec.Command(name, args...)
 	process.Stdin = stdin
 	process.Stdout = stdout
@@ -31,6 +30,10 @@ func (ExecRunner) Run(ctx context.Context, name string, args []string, stdin io.
 
 	if err := process.Start(); err != nil {
 		return err
+	}
+	grace := r.Grace
+	if grace <= 0 {
+		grace = defaultTermGrace
 	}
 
 	done := make(chan struct{})
@@ -48,7 +51,7 @@ func (ExecRunner) Run(ctx context.Context, name string, args []string, stdin io.
 				_ = process.Process.Signal(syscall.SIGTERM)
 				select {
 				case <-done:
-				case <-time.After(termGracePeriod):
+				case <-time.After(grace):
 					_ = process.Process.Kill()
 				}
 				return

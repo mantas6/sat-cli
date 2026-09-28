@@ -7,10 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	registerCommand(newNotifyCommand)
-}
-
 func newNotifyCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "notify MESSAGE",

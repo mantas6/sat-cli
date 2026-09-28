@@ -77,8 +77,6 @@ func TestDashboardFollowIntervalsAndFetcher(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			previous := runDashboard
-			t.Cleanup(func() { runDashboard = previous })
 
 			apiCalls := 0
 			client := &dashboardAPI{stubAPI: &stubAPI{}, dashboard: func(context.Context) (string, error) {
@@ -86,7 +84,7 @@ func TestDashboardFollowIntervalsAndFetcher(t *testing.T) {
 				return "latest", nil
 			}}
 			var gotInterval time.Duration
-			runDashboard = func(_ context.Context, _ io.Reader, _ io.Writer, fetch ui.Fetcher, opts ui.DashboardOptions) error {
+			followStub := func(_ context.Context, _ io.Reader, _ io.Writer, fetch ui.Fetcher, opts ui.DashboardOptions) error {
 				gotInterval = opts.Interval
 				text, err := fetch(context.Background())
 				if err != nil {
@@ -98,6 +96,8 @@ func TestDashboardFollowIntervalsAndFetcher(t *testing.T) {
 				return nil
 			}
 			app, _ := newWeatherNotifyTestApp(client)
+			app.Follow = followStub
+			app.IsTTY = func(any) bool { return true }
 
 			if err := executeWeatherNotifyTestCommand(app, test.args...); err != nil {
 				t.Fatal(err)
@@ -130,9 +130,6 @@ func TestDashboardFollowRejectsInvalidIntervals(t *testing.T) {
 }
 
 func TestDashboardFollowRequiresTerminalWithoutStub(t *testing.T) {
-	previous := runDashboard
-	t.Cleanup(func() { runDashboard = previous })
-	runDashboard = ui.Follow
 	app, _ := newWeatherNotifyTestApp(&dashboardAPI{stubAPI: &stubAPI{}})
 
 	err := executeWeatherNotifyTestCommand(app, "dashboard", "--follow")

@@ -17,11 +17,9 @@ import (
 )
 
 func TestArticleEditOffersNewFirstAndFetchesRecentArticles(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
 	var gotItems []ui.Item
 	var gotQuery string
-	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, options ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, options ui.SelectOptions) (ui.Item, error) {
 		gotItems = append([]ui.Item(nil), items...)
 		gotQuery = options.Query
 		return items[0], nil
@@ -33,6 +31,8 @@ func TestArticleEditOffersNewFirstAndFetchesRecentArticles(t *testing.T) {
 		return []api.Article{{ID: 1, Title: "Shared article older"}, {ID: 2, Title: "Shared article recent"}}, nil
 	}}
 	app, _, _, stderr := newArticleLifecycleApp(t, client)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
 	app.Runner = &recordingArticleRunner{}
 
 	if err := executeArticleTestCommand(app, "article", "edit", "Shared", "article"); err != nil {
@@ -50,10 +50,6 @@ func TestArticleEditOffersNewFirstAndFetchesRecentArticles(t *testing.T) {
 }
 
 func TestArticleEditWithIDDownloadsFilesAndBuildsEditorInvocation(t *testing.T) {
-	previousExecutable := executablePath
-	executablePath = func() (string, error) { return "/opt/Satellite's tools/sat", nil }
-	t.Cleanup(func() { executablePath = previousExecutable })
-
 	client := &articleLifecycleAPI{stubAPI: &stubAPI{}, list: func(context.Context, bool) ([]api.Article, error) {
 		t.Fatal("ListArticles() called with --id")
 		return nil, nil
@@ -80,6 +76,7 @@ func TestArticleEditWithIDDownloadsFilesAndBuildsEditorInvocation(t *testing.T) 
 	}}
 	app, _, _, _ := newArticleLifecycleApp(t, client)
 	app.Runner = runner
+	app.Executable = func() (string, error) { return "/opt/Satellite's tools/sat", nil }
 
 	if err := executeArticleTestCommand(app, "article", "edit", "--id", "27"); err != nil {
 		t.Fatal(err)
@@ -97,9 +94,7 @@ func TestArticleEditWithIDDownloadsFilesAndBuildsEditorInvocation(t *testing.T) 
 }
 
 func TestArticleNewSavedAssignsJournal(t *testing.T) {
-	previous := runSelector
-	t.Cleanup(func() { runSelector = previous })
-	runSelector = func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, _ ui.SelectOptions) (ui.Item, error) {
+	selectStub := func(_ context.Context, _ io.Reader, _ io.Writer, items []ui.Item, _ ui.SelectOptions) (ui.Item, error) {
 		return items[0], nil
 	}
 
@@ -119,6 +114,8 @@ func TestArticleNewSavedAssignsJournal(t *testing.T) {
 		return os.WriteFile(filepath.Join(workDir, "id"), []byte("81\n"), 0o600)
 	}}
 	app, _, _, _ := newArticleLifecycleApp(t, client)
+	app.Select = selectStub
+	app.IsTTY = func(any) bool { return true }
 	app.Runner = runner
 
 	if err := executeArticleTestCommand(app, "article", "new"); err != nil {

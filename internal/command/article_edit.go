@@ -23,8 +23,6 @@ const (
 
 const editorBinary = "nvim"
 
-var executablePath = os.Executable
-
 func newArticleEditCommand(app *App) *cobra.Command {
 	var id string
 	command := &cobra.Command{
@@ -117,7 +115,7 @@ func editArticle(ctx context.Context, command *cobra.Command, app *App, client A
 		}
 	}
 
-	executable, err := executablePath()
+	executable, err := app.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve sat executable: %w", err)
 	}

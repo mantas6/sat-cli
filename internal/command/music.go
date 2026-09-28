@@ -11,10 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	registerCommand(newMusicCommand)
-}
-
 func newMusicCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "music",

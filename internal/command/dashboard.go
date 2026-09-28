@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -18,15 +16,7 @@ const (
 	dashboardRequestTimeout  = 10 * time.Second
 )
 
-type dashboardFunc func(context.Context, io.Reader, io.Writer, ui.Fetcher, ui.DashboardOptions) error
-
-var runDashboard dashboardFunc = ui.Follow
-
 var errDashboardNeedsTerminal = errors.New("dashboard follow mode requires a terminal on stdout")
-
-func init() {
-	registerCommand(newDashboardCommand)
-}
 
 func newDashboardCommand(app *App) *cobra.Command {
 	var follow time.Duration
@@ -56,7 +46,7 @@ func newDashboardCommand(app *App) *cobra.Command {
 			if follow <= 0 {
 				return errors.New("dashboard follow interval must be greater than zero")
 			}
-			if !dashboardTerminal(app) {
+			if !app.IsTTY(app.Stdout) {
 				return errDashboardNeedsTerminal
 			}
 
@@ -70,8 +60,10 @@ func newDashboardCommand(app *App) *cobra.Command {
 				return client.Dashboard(requestContext)
 			}
 			opts := ui.DashboardOptions{Interval: follow}
-			fillDashboardTerminalSize(app, &opts)
-			return runDashboard(cmd.Context(), app.Stdin, app.Stdout, fetch, opts)
+			if width, height, ok := app.TermSize(); ok {
+				opts.Width, opts.Height = width, height
+			}
+			return app.Follow(cmd.Context(), app.Stdin, app.Stdout, fetch, opts)
 		},
 	}
 	command.Flags().DurationVarP(&follow, "follow", "f", 0, "refresh continuously (default interval 5s)")
@@ -95,29 +87,4 @@ func printDashboard(ctx context.Context, app *App) error {
 		_, err = fmt.Fprintln(app.Stdout)
 	}
 	return err
-}
-
-func dashboardTerminal(app *App) bool {
-	output, ok := app.Stdout.(*os.File)
-	if !ok {
-		return dashboardStubbed()
-	}
-	return app.IsTerminal(int(output.Fd()))
-}
-
-func fillDashboardTerminalSize(app *App, opts *ui.DashboardOptions) {
-	output, ok := app.Stdout.(*os.File)
-	if !ok {
-		return
-	}
-	width, height, err := app.TerminalSize(int(output.Fd()))
-	if err != nil {
-		return
-	}
-	opts.Width = width
-	opts.Height = height
-}
-
-func dashboardStubbed() bool {
-	return fmt.Sprintf("%p", runDashboard) != fmt.Sprintf("%p", dashboardFunc(ui.Follow))
 }
