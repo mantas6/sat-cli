@@ -95,7 +95,7 @@ func TestMusicSyncWritesTrackCache(t *testing.T) {
 	if err := executeMusicTestCommand(app, "music", "sync"); err != nil {
 		t.Fatal(err)
 	}
-	if store.writtenKey != "tracks" || !reflect.DeepEqual(store.written, want) {
+	if store.writtenKey != trackCacheName || !reflect.DeepEqual(store.written, want) {
 		t.Fatalf("cache write = (%q, %#v), want tracks and %#v", store.writtenKey, store.written, want)
 	}
 	if got := stderr.String(); got != "Synced 2 tracks.\n" {
@@ -286,21 +286,5 @@ func TestMusicSelectionRequiresTerminalWithoutHook(t *testing.T) {
 	err := executeMusicTestCommand(app, "music", "play")
 	if err == nil || err.Error() != "interactive selection requires a terminal on stdin and stdout" {
 		t.Fatalf("Execute() error = %v, want terminal requirement", err)
-	}
-}
-
-func TestParseTrackLines(t *testing.T) {
-	items := parseTrackLines([]string{
-		"",
-		" \t ",
-		"id-only",
-		"track-id\tArtist\t/Album\t/03.\tTitle",
-	})
-	want := []ui.Item{
-		{ID: "id-only", Columns: []string{}},
-		{ID: "track-id", Columns: []string{"Artist", "/Album", "/03.", "Title"}},
-	}
-	if !reflect.DeepEqual(items, want) {
-		t.Fatalf("parseTrackLines() = %#v, want %#v", items, want)
 	}
 }

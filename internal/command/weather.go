@@ -1,11 +1,6 @@
 package command
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 func newWeatherCommand(app *App) *cobra.Command {
 	return &cobra.Command{
@@ -28,13 +23,7 @@ func newWeatherCommand(app *App) *cobra.Command {
 				return err
 			}
 
-			if _, err := fmt.Fprint(app.Stdout, forecast); err != nil {
-				return err
-			}
-			if !strings.HasSuffix(forecast, "\n") {
-				_, err = fmt.Fprintln(app.Stdout)
-			}
-			return err
+			return writeLine(app.Stdout, forecast)
 		},
 	}
 }

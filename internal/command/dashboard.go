@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/mantas6/sat-cli/internal/ui"
@@ -80,11 +79,5 @@ func printDashboard(ctx context.Context, app *App) error {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprint(app.Stdout, text); err != nil {
-		return err
-	}
-	if !strings.HasSuffix(text, "\n") {
-		_, err = fmt.Fprintln(app.Stdout)
-	}
-	return err
+	return writeLine(app.Stdout, text)
 }

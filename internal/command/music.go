@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mantas6/sat-cli/internal/api"
-	"github.com/mantas6/sat-cli/internal/config"
 	"github.com/mantas6/sat-cli/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -50,7 +49,7 @@ func newMusicSyncCommand(app *App) *cobra.Command {
 			for index, line := range lines {
 				lines[index] = cacheLineReplacer.Replace(line)
 			}
-			if err := app.Config.WriteCacheLines("tracks", lines); err != nil {
+			if err := app.Config.WriteCacheLines(trackCacheName, lines); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(app.Stderr, "Synced %d tracks.\n", len(lines))
@@ -72,14 +71,14 @@ func newMusicPlayCommand(app *App) *cobra.Command {
 			}
 
 			if trackID == "" {
-				lines, exists, err := app.Config.ReadCacheLines("tracks")
+				lines, exists, err := app.Config.ReadCacheLines(trackCacheName)
 				if err != nil {
 					return err
 				}
 				if !exists {
 					return errors.New("track cache is missing; run `sat music sync`")
 				}
-				item, err := selectItem(cmd.Context(), app, parseTrackLines(lines), ui.SelectOptions{
+				item, err := selectItem(cmd.Context(), app, parseCacheLines(lines), ui.SelectOptions{
 					Title: "Saved tracks",
 					Query: strings.Join(args, " "),
 				})
@@ -113,24 +112,4 @@ func newMusicControlCommand(app *App, name string, action api.PlaybackAction) *c
 			return client.ControlPlayback(cmd.Context(), action)
 		},
 	}
-}
-
-func parseTrackLines(lines []string) []ui.Item {
-	items := make([]ui.Item, 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		fields := config.SplitTabs(line)
-		if fields[0] == "" {
-			continue
-		}
-		columns := make([]string, len(fields)-1)
-		copy(columns, fields[1:])
-		items = append(items, ui.Item{
-			ID:      fields[0],
-			Columns: columns,
-		})
-	}
-	return items
 }

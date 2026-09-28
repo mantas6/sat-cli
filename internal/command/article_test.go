@@ -31,7 +31,7 @@ func (a *articleAPI) GetArticle(ctx context.Context, id int) (api.ArticleContent
 	return a.get(ctx, id)
 }
 
-func TestArticleLineFormatsLegacyCacheLine(t *testing.T) {
+func TestArticleItemFormatsLegacyCacheLine(t *testing.T) {
 	article := api.Article{
 		ID:        42,
 		Title:     "A title",
@@ -39,16 +39,16 @@ func TestArticleLineFormatsLegacyCacheLine(t *testing.T) {
 		CreatedAt: "2026-09-21",
 		Journal:   &api.Journal{Title: "Notes"},
 	}
-	if got, want := articleLine(article), "42\tA title\t123w\t2026-09-21\tNotes"; got != want {
-		t.Fatalf("articleLine() = %q, want %q", got, want)
+	if got, want := cacheLine(articleItem(article)), "42\tA title\t123w\t2026-09-21\tNotes"; got != want {
+		t.Fatalf("cacheLine(articleItem()) = %q, want %q", got, want)
 	}
 	article.Journal = nil
-	if got, want := articleLine(article), "42\tA title\t123w\t2026-09-21\t"; got != want {
-		t.Fatalf("articleLine() with nil journal = %q, want %q", got, want)
+	if got, want := cacheLine(articleItem(article)), "42\tA title\t123w\t2026-09-21\t"; got != want {
+		t.Fatalf("cacheLine(articleItem()) with nil journal = %q, want %q", got, want)
 	}
 }
 
-func TestArticleLineNeutralisesSeparatorsInFields(t *testing.T) {
+func TestArticleItemNeutralisesSeparatorsInFields(t *testing.T) {
 	article := api.Article{
 		ID:        7,
 		Title:     "Tabs\tand\nnew\r\nlines\r",
@@ -56,18 +56,18 @@ func TestArticleLineNeutralisesSeparatorsInFields(t *testing.T) {
 		CreatedAt: "today\n",
 		Journal:   &api.Journal{Title: "Work\tLog"},
 	}
-	line := articleLine(article)
+	line := cacheLine(articleItem(article))
 	if got, want := line, "7\tTabs and new lines \t1w\ttoday \tWork Log"; got != want {
-		t.Fatalf("articleLine() = %q, want %q", got, want)
+		t.Fatalf("cacheLine(articleItem()) = %q, want %q", got, want)
 	}
-	items := parseArticleLines([]string{line})
+	items := parseCacheLines([]string{line})
 	if len(items) != 1 || items[0].ID != "7" || len(items[0].Columns) != 4 {
-		t.Fatalf("parseArticleLines(articleLine()) = %#v, want one item with 4 columns", items)
+		t.Fatalf("parseCacheLines(cacheLine(articleItem())) = %#v, want one item with 4 columns", items)
 	}
 }
 
-func TestParseArticleLinesToleratesLegacyShortLines(t *testing.T) {
-	got := parseArticleLines([]string{
+func TestParseCacheLinesToleratesLegacyShortLines(t *testing.T) {
+	got := parseCacheLines([]string{
 		"",
 		" \t ",
 		"7",
@@ -78,18 +78,7 @@ func TestParseArticleLinesToleratesLegacyShortLines(t *testing.T) {
 		{ID: "8", Columns: []string{"Title", "20w", "2026-09-21", "Journal"}},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseArticleLines() = %#v, want %#v", got, want)
-	}
-}
-
-func TestReverseItemsReturnsNewestFirstWithoutMutatingInput(t *testing.T) {
-	items := []ui.Item{{ID: "oldest"}, {ID: "middle"}, {ID: "newest"}}
-	got := reverseItems(items)
-	if got[0].ID != "newest" || got[2].ID != "oldest" {
-		t.Fatalf("reverseItems() = %#v", got)
-	}
-	if items[0].ID != "oldest" {
-		t.Fatalf("reverseItems() mutated input: %#v", items)
+		t.Fatalf("parseCacheLines() = %#v, want %#v", got, want)
 	}
 }
 

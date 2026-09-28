@@ -44,11 +44,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				lines := make([]string, len(articles))
-				for index, article := range articles {
-					lines[index] = articleLine(article)
-				}
-				items := append([]ui.Item{{ID: newArticleItemID, Columns: []string{"New"}}}, reverseItems(parseArticleLines(lines))...)
+				items := append([]ui.Item{{ID: newArticleItemID, Columns: []string{"New"}}}, newestFirst(articles)...)
 				item, err := selectItem(cmd.Context(), app, items, ui.SelectOptions{
 					Title: "Articles",
 					Query: strings.Join(args, " "),

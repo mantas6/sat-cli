@@ -2,7 +2,6 @@ package command
 
 import (
 	"errors"
-	"io"
 	"strings"
 
 	"github.com/mantas6/sat-cli/internal/ui"
@@ -51,7 +50,7 @@ func newArticleReadCommand(app *App) *cobra.Command {
 				return err
 			}
 			if raw || !app.IsTTY(app.Stdout) {
-				return writeArticleContents(app.Stdout, article.Contents)
+				return writeLine(app.Stdout, article.Contents)
 			}
 
 			// An unknown size stays zero and the pager falls back to 80x24.
@@ -66,15 +65,4 @@ func newArticleReadCommand(app *App) *cobra.Command {
 	command.Flags().StringVar(&id, "id", "", "article ID")
 	command.Flags().BoolVar(&raw, "raw", false, "print raw Markdown")
 	return command
-}
-
-func writeArticleContents(writer io.Writer, contents string) error {
-	if _, err := io.WriteString(writer, contents); err != nil {
-		return err
-	}
-	if !strings.HasSuffix(contents, "\n") {
-		_, err := io.WriteString(writer, "\n")
-		return err
-	}
-	return nil
 }

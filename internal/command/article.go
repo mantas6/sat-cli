@@ -3,16 +3,14 @@ package command
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/mantas6/sat-cli/internal/api"
-	"github.com/mantas6/sat-cli/internal/config"
 	"github.com/mantas6/sat-cli/internal/ui"
 	"github.com/spf13/cobra"
 )
-
-const articleCacheName = "list"
 
 func newArticleCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
@@ -54,51 +52,33 @@ func newArlCommand(app *App) *cobra.Command {
 	return command
 }
 
-// cacheFieldReplacer neutralises the separators of the tab-delimited,
-// newline-terminated cache format inside a single field.
-var cacheFieldReplacer = strings.NewReplacer("\r\n", " ", "\t", " ", "\n", " ", "\r", " ")
-
-// cacheLineReplacer neutralises line breaks inside an already tab-delimited
-// cache line so it stays one record.
-var cacheLineReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
-
-func articleLine(article api.Article) string {
+// articleItem is the picker item and cache record of one article: ID, title,
+// word count, creation date and journal title.
+func articleItem(article api.Article) ui.Item {
 	journalTitle := ""
 	if article.Journal != nil {
 		journalTitle = article.Journal.Title
 	}
-	return fmt.Sprintf("%d\t%s\t%dw\t%s\t%s",
-		article.ID,
-		cacheFieldReplacer.Replace(article.Title),
-		article.WordCount,
-		cacheFieldReplacer.Replace(article.CreatedAt),
-		cacheFieldReplacer.Replace(journalTitle),
-	)
+	return ui.Item{
+		ID: strconv.Itoa(article.ID),
+		Columns: []string{
+			cacheFieldReplacer.Replace(article.Title),
+			fmt.Sprintf("%dw", article.WordCount),
+			cacheFieldReplacer.Replace(article.CreatedAt),
+			cacheFieldReplacer.Replace(journalTitle),
+		},
+	}
 }
 
-func parseArticleLines(lines []string) []ui.Item {
-	items := make([]ui.Item, 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		fields := config.SplitTabs(line)
-		if fields[0] == "" {
-			continue
-		}
-		columns := make([]string, len(fields)-1)
-		copy(columns, fields[1:])
-		items = append(items, ui.Item{ID: fields[0], Columns: columns})
+// newestFirst returns the picker items of articles, which the API lists
+// oldest first, with the newest article first.
+func newestFirst(articles []api.Article) []ui.Item {
+	items := make([]ui.Item, len(articles))
+	for index, article := range articles {
+		items[index] = articleItem(article)
 	}
+	slices.Reverse(items)
 	return items
-}
-
-func reverseItems(items []ui.Item) []ui.Item {
-	reversed := make([]ui.Item, len(items))
-	for index := range items {
-		reversed[len(items)-1-index] = items[index]
-	}
-	return reversed
 }
 
 func cachedArticleItems(ctx context.Context, app *App, client APIClient, all bool) ([]ui.Item, error) {
@@ -107,7 +87,9 @@ func cachedArticleItems(ctx context.Context, app *App, client APIClient, all boo
 		return nil, err
 	}
 	if exists {
-		return reverseItems(parseArticleLines(lines)), nil
+		items := parseCacheLines(lines)
+		slices.Reverse(items)
+		return items, nil
 	}
 
 	if _, err := fmt.Fprintln(app.Stderr, "Fetching articles list..."); err != nil {
@@ -117,12 +99,15 @@ func cachedArticleItems(ctx context.Context, app *App, client APIClient, all boo
 	if err != nil {
 		return nil, err
 	}
+	items := make([]ui.Item, len(articles))
 	lines = make([]string, len(articles))
 	for index, article := range articles {
-		lines[index] = articleLine(article)
+		items[index] = articleItem(article)
+		lines[index] = cacheLine(items[index])
 	}
 	if err := app.Config.WriteCacheLines(articleCacheName, lines); err != nil {
 		return nil, err
 	}
-	return reverseItems(parseArticleLines(lines)), nil
+	slices.Reverse(items)
+	return items, nil
 }
