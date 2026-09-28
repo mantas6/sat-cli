@@ -2,10 +2,9 @@ package command
 
 import (
 	"context"
+	"errors"
 	"io"
-	"os"
 	"os/exec"
-	"os/signal"
 	"syscall"
 	"time"
 )
@@ -17,53 +16,48 @@ type ExecRunner struct {
 	Grace time.Duration
 }
 
-// Run executes one child process attached to the provided streams. Instead of
-// hard-killing the child when ctx is cancelled, Run forwards os.Interrupt and
-// SIGTERM to the process and, on cancellation, sends SIGTERM followed by a
-// Kill after a short grace period. This lets interactive children (e.g. ssh)
-// tear down cleanly. The *exec.ExitError from Wait is returned unchanged.
+// Run executes one child process attached to the provided streams. When ctx is
+// cancelled the child receives SIGTERM and is killed if it has not exited
+// after the grace period, so interactive children (e.g. ssh) can tear down
+// cleanly. Terminal signals need no forwarding: the tty delivers SIGINT to the
+// whole foreground process group, child included.
+//
+// Run returns ctx.Err() whenever ctx was cancelled, regardless of how the
+// child exited, so callers see one deterministic cancellation error.
+// Otherwise the *exec.ExitError from Wait is returned unchanged.
 func (r ExecRunner) Run(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	process := exec.Command(name, args...)
-	process.Stdin = stdin
-	process.Stdout = stdout
-	process.Stderr = stderr
-
-	if err := process.Start(); err != nil {
-		return err
-	}
 	grace := r.Grace
 	if grace <= 0 {
 		grace = defaultTermGrace
 	}
 
-	done := make(chan struct{})
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	process := exec.CommandContext(ctx, name, args...)
+	process.Stdin = stdin
+	process.Stdout = stdout
+	process.Stderr = stderr
+	// On platforms without SIGTERM, Signal fails and WaitDelay kills the
+	// child once the grace period has passed.
+	process.Cancel = func() error { return process.Process.Signal(syscall.SIGTERM) }
+	process.WaitDelay = grace
 
-	watcherDone := make(chan struct{})
-	go func() {
-		defer close(watcherDone)
-		for {
-			select {
-			case sig := <-sigCh:
-				_ = process.Process.Signal(sig)
-			case <-ctx.Done():
-				_ = process.Process.Signal(syscall.SIGTERM)
-				select {
-				case <-done:
-				case <-time.After(grace):
-					_ = process.Process.Kill()
-				}
-				return
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	err := process.Wait()
-	close(done)
-	signal.Stop(sigCh)
-	<-watcherDone
+	err := process.Run()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 	return err
+}
+
+// childExitError turns a child process exit into an ExitError carrying the
+// child's exit code, or the conventional 128+signal code when a signal
+// terminated it. Other errors (start failures, cancellation) pass through.
+func childExitError(err error) error {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+	code, signalled := signalExitCode(exitErr)
+	if !signalled {
+		code = exitErr.ExitCode()
+	}
+	return ExitError{Code: code, Err: err}
 }

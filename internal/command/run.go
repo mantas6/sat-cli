@@ -1,11 +1,9 @@
 package command
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/url"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -76,23 +74,10 @@ func newRunCommand(app *App) *cobra.Command {
 			}
 			sshArgs = append(sshArgs, destination, remoteCommand)
 
-			// ExecRunner forwards signals to ssh and terminates it gracefully on
-			// context cancellation rather than hard-killing the process.
+			// ExecRunner sends ssh SIGTERM on context cancellation rather than
+			// hard-killing it, so the remote session can tear down.
 			err = app.Runner.Run(cmd.Context(), sshBinary, sshArgs, app.Stdin, app.Stdout, app.Stderr)
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				code := exitErr.ExitCode()
-				if code == -1 {
-					// Killed by a signal; map to the conventional 128+signal code.
-					if signalCode, ok := signalExitCode(exitErr); ok {
-						code = signalCode
-					} else {
-						code = 130
-					}
-				}
-				return ExitError{Code: code, Err: err}
-			}
-			return err
+			return childExitError(err)
 		},
 	}
 

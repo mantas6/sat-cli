@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -116,13 +115,8 @@ func editArticle(ctx context.Context, app *App, client APIClient, id int, isNew 
 		return fmt.Errorf("resolve sat executable: %w", err)
 	}
 	args := []string{"-c", editorCommand(executable, workDir), contentsPath}
-	err = app.Runner.Run(ctx, editorBinary, args, app.Stdin, app.Stdout, app.Stderr)
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return ExitError{Code: exitErr.ExitCode(), Err: err}
-	}
-	if err != nil {
-		return err
+	if err := app.Runner.Run(ctx, editorBinary, args, app.Stdin, app.Stdout, app.Stderr); err != nil {
+		return childExitError(err)
 	}
 
 	if !isNew {
