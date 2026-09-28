@@ -30,12 +30,46 @@ func TestStateDirPrecedence(t *testing.T) {
 			env:  map[string]string{"HOME": "/home/test"},
 			want: "/home/test/.local/state/sat",
 		},
+		{
+			name: "relative xdg state home is ignored",
+			env:  map[string]string{"XDG_STATE_HOME": "relative/state", "HOME": "/home/test"},
+			want: "/home/test/.local/state/sat",
+		},
+		{
+			name: "journal state without home",
+			env:  map[string]string{"SAT_JOURNAL_STATE": "/custom"},
+			want: "/custom",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := StateDir(mapEnv(test.env)); got != test.want {
+			got, err := StateDir(mapEnv(test.env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
 				t.Fatalf("StateDir() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestStateDirRequiresAbsoluteHome(t *testing.T) {
+	tests := map[string]map[string]string{
+		"empty home":                    {},
+		"blank home":                    {"HOME": "  "},
+		"relative home":                 {"HOME": "home/test"},
+		"relative xdg and missing home": {"XDG_STATE_HOME": "relative"},
+	}
+	for name, env := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := StateDir(mapEnv(env))
+			if err == nil {
+				t.Fatalf("StateDir() = %q, want error", got)
+			}
+			if got != "" || !strings.Contains(err.Error(), "HOME") {
+				t.Fatalf("StateDir() = %q, %v; want empty path and HOME error", got, err)
 			}
 		})
 	}

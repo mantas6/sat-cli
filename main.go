@@ -18,7 +18,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	app := command.NewDefaultApp()
+	app, err := command.NewDefaultApp()
+	if err != nil {
+		exit(err)
+	}
 	app.Version = version
 	root := command.NewRootCommand(app)
 

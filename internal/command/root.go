@@ -127,11 +127,16 @@ type App struct {
 	Version      string
 }
 
-// NewDefaultApp wires App to the operating system and the real API client.
-func NewDefaultApp() *App {
+// NewDefaultApp wires App to the operating system and the real API client. It
+// fails when the state directory cannot be resolved.
+func NewDefaultApp() (*App, error) {
 	getenv := os.Getenv
+	stateDir, err := config.StateDir(getenv)
+	if err != nil {
+		return nil, err
+	}
 	return &App{
-		Config: config.NewStore(config.StateDir(getenv), getenv),
+		Config: config.NewStore(stateDir, getenv),
 		NewAPIClient: func(baseURL, token string) (APIClient, error) {
 			return api.NewClient(baseURL, token)
 		},
@@ -144,15 +149,13 @@ func NewDefaultApp() *App {
 		Getenv:       os.Getenv,
 		Runner:       ExecRunner{},
 		Version:      "dev",
-	}
+	}, nil
 }
 
 // NewRootCommand builds the sat command tree. Register future commands with
 // root.AddCommand(newXCommand(app)); each constructor remains easy to test.
+// app must not be nil; use NewDefaultApp for the operating-system wiring.
 func NewRootCommand(app *App) *cobra.Command {
-	if app == nil {
-		app = NewDefaultApp()
-	}
 	normalizeApp(app)
 
 	root := &cobra.Command{
