@@ -190,14 +190,15 @@ func TestWeatherWithoutPlaceOmitsSegmentAndAuthentication(t *testing.T) {
 
 func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 	tests := []struct {
-		status int
-		body   string
-		want   string
+		status   int
+		body     string
+		want     string
+		sentinel error
 	}{
-		{http.StatusUnauthorized, `{"message":"bad credentials"}`, "token is invalid or expired; run `sat auth login`"},
-		{http.StatusForbidden, `{"message":"ability denied"}`, "token lacks the required ability"},
-		{http.StatusUnprocessableEntity, `{"message":"The contents field is required."}`, "The contents field is required."},
-		{http.StatusInternalServerError, "server exploded", "server exploded"},
+		{http.StatusUnauthorized, `{"message":"bad credentials"}`, "bad credentials; token is invalid or expired", ErrUnauthorized},
+		{http.StatusForbidden, `{"message":"ability denied"}`, "ability denied; token lacks the required ability", ErrForbidden},
+		{http.StatusUnprocessableEntity, `{"message":"The contents field is required."}`, "The contents field is required.", nil},
+		{http.StatusInternalServerError, "server exploded", "server exploded", nil},
 	}
 
 	for _, test := range tests {
@@ -219,6 +220,14 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %q, want %q", err, test.want)
+			}
+			if strings.Contains(err.Error(), "sat auth login") {
+				t.Fatalf("error = %q, want no CLI hint from the api package", err)
+			}
+			for _, sentinel := range []error{ErrUnauthorized, ErrForbidden} {
+				if got, want := errors.Is(err, sentinel), sentinel == test.sentinel; got != want {
+					t.Fatalf("errors.Is(err, %v) = %v, want %v", sentinel, got, want)
+				}
 			}
 		})
 	}

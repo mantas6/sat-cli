@@ -181,7 +181,7 @@ func (c *fakeConfig) SetBaseURL(value string) error {
 func (c *fakeConfig) SetToken(value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return config.ErrTokenMissing
+		return config.ErrEmptyToken
 	}
 	c.token = value
 	return nil

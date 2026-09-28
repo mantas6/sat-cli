@@ -42,6 +42,7 @@ Environment:
 		newRunCommand(app),
 		newWeatherCommand(app),
 	)
+	addLoginHints(root)
 
 	return root
 }

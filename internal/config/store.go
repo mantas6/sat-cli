@@ -16,9 +16,11 @@ const (
 
 var (
 	// ErrBaseURLMissing indicates that no server URL has been configured.
-	ErrBaseURLMissing = errors.New("URL is not configured. Run `sat auth login`.")
+	ErrBaseURLMissing = errors.New("base URL is not configured")
 	// ErrTokenMissing indicates that no API token has been configured.
-	ErrTokenMissing = errors.New("Token is not configured. Run `sat auth login`.")
+	ErrTokenMissing = errors.New("token is not configured")
+	// ErrEmptyToken indicates an attempt to save a blank API token.
+	ErrEmptyToken = errors.New("token must not be empty")
 )
 
 // Store reads and writes configuration and caches under one state directory.
@@ -71,11 +73,12 @@ func (s *Store) SetBaseURL(value string) error {
 	return s.writeAtomic(s.urlPath(), []byte(value+"\n"))
 }
 
-// SetToken atomically persists a bearer token.
+// SetToken atomically persists a bearer token. A blank value is rejected with
+// ErrEmptyToken.
 func (s *Store) SetToken(value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return ErrTokenMissing
+		return ErrEmptyToken
 	}
 
 	return s.writeAtomic(s.tokenPath(), []byte(value+"\n"))
@@ -196,18 +199,22 @@ func (s *Store) RemoveCache(name string) error {
 	return nil
 }
 
+// readTrimmed returns the whitespace-trimmed contents of path. A missing or
+// blank file yields missing wrapped with the path, so errors.Is still matches
+// the sentinel while the message names the file that was consulted.
 func (s *Store) readTrimmed(path string, missing error) (string, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", missing
+		return "", fmt.Errorf("%w (%s)", missing, path)
 	}
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
+		// The *fs.PathError already names the path.
+		return "", fmt.Errorf("read configuration: %w", err)
 	}
 
 	value := strings.TrimSpace(string(data))
 	if value == "" {
-		return "", missing
+		return "", fmt.Errorf("%w (%s is empty)", missing, path)
 	}
 
 	return value, nil

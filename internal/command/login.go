@@ -113,7 +113,7 @@ func (p loginPrompter) promptToken(ctx context.Context) error {
 		}
 		value = string(password)
 		// Ctrl+D with no input surfaces as io.EOF; fall through to SetToken so
-		// the user sees ErrTokenMissing instead of "read token: EOF".
+		// the user sees ErrEmptyToken instead of "read token: EOF".
 		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("read token: %w", err)
 		}

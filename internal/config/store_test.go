@@ -249,6 +249,36 @@ func TestStoreMissingConfiguration(t *testing.T) {
 	}
 }
 
+func TestStoreMissingErrorsNameTheFile(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir, mapEnv(nil))
+	if err := os.WriteFile(filepath.Join(dir, "token"), []byte(" \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := store.BaseURL()
+	if !errors.Is(err, ErrBaseURLMissing) || !strings.Contains(err.Error(), filepath.Join(dir, "url")) {
+		t.Fatalf("BaseURL() error = %v, want ErrBaseURLMissing naming the url file", err)
+	}
+	_, err = store.Token()
+	if !errors.Is(err, ErrTokenMissing) || !strings.Contains(err.Error(), filepath.Join(dir, "token")+" is empty") {
+		t.Fatalf("Token() error = %v, want ErrTokenMissing naming the empty token file", err)
+	}
+}
+
+func TestSetTokenRejectsBlankToken(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir, mapEnv(nil))
+	for _, value := range []string{"", "   ", "\n\t"} {
+		if err := store.SetToken(value); !errors.Is(err, ErrEmptyToken) {
+			t.Fatalf("SetToken(%q) = %v, want ErrEmptyToken", value, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "token")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("blank token created a file: %v", err)
+	}
+}
+
 func TestStoreRejectsMalformedBaseURL(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))

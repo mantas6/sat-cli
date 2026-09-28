@@ -95,8 +95,8 @@ func TestLoginWarnsWhenReplacingToken(t *testing.T) {
 func TestLoginRejectsEmptyToken(t *testing.T) {
 	t.Parallel()
 	cfg := &fakeConfig{baseURL: "https://sat.example", token: "old-token"}
-	if _, err := executeLogin(t, cfg, "\n"); !errors.Is(err, config.ErrTokenMissing) {
-		t.Fatalf("err = %v, want ErrTokenMissing", err)
+	if _, err := executeLogin(t, cfg, "\n"); !errors.Is(err, config.ErrEmptyToken) {
+		t.Fatalf("err = %v, want ErrEmptyToken", err)
 	}
 	if cfg.token != "old-token" {
 		t.Fatalf("token = %q, want the old token kept", cfg.token)
@@ -202,7 +202,7 @@ func TestLoginTokenPromptCancels(t *testing.T) {
 	}
 }
 
-func TestLoginTokenPromptEOFReturnsMissing(t *testing.T) {
+func TestLoginTokenPromptEOFReturnsEmptyToken(t *testing.T) {
 	t.Parallel()
 	cfg := &fakeConfig{baseURL: "https://sat.example"}
 	stdin, _ := pipe(t)
@@ -212,8 +212,8 @@ func TestLoginTokenPromptEOFReturnsMissing(t *testing.T) {
 	app.TerminalState = func(int) (*term.State, error) { return &term.State{}, nil }
 
 	err := run(t, app, "auth", "login")
-	if !errors.Is(err, config.ErrTokenMissing) {
-		t.Fatalf("err = %v, want ErrTokenMissing", err)
+	if !errors.Is(err, config.ErrEmptyToken) {
+		t.Fatalf("err = %v, want ErrEmptyToken", err)
 	}
 	if cfg.token != "" {
 		t.Fatalf("token = %q", cfg.token)
