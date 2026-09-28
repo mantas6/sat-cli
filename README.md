@@ -32,7 +32,9 @@ appears directly above it, and `up` moves away from the prompt.
 ## Build
 
 ```sh
-go build -trimpath -o sat .
+go build -trimpath -o sat ./cmd/sat
+# or
+go install github.com/mantas6/sat-cli/cmd/sat@latest
 ```
 
 Requires Go and, for `sat article edit|new`, Neovim. The version shown by
@@ -64,5 +66,5 @@ when the session is terminated by a signal.
 ```sh
 go test ./...
 go vet ./...
-go build .
+go build -o sat ./cmd/sat
 ```
