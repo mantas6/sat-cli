@@ -39,9 +39,9 @@ func newRunCommand(app *App) *cobra.Command {
 		Short:              "Run Artisan on the remote Satellite host",
 		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: true,
-		RunE: func(command *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-				return command.Help()
+				return cmd.Help()
 			}
 
 			var baseURL string
@@ -78,7 +78,7 @@ func newRunCommand(app *App) *cobra.Command {
 
 			// ExecRunner forwards signals to ssh and terminates it gracefully on
 			// context cancellation rather than hard-killing the process.
-			err = app.Runner.Run(command.Context(), sshBinary, sshArgs, app.Stdin, app.Stdout, app.Stderr)
+			err = app.Runner.Run(cmd.Context(), sshBinary, sshArgs, app.Stdin, app.Stdout, app.Stderr)
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				code := exitErr.ExitCode()

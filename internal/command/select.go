@@ -1,11 +1,11 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"github.com/mantas6/sat-cli/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 var errSelectorNeedsTerminal = errors.New("interactive selection requires a terminal on stdin and stdout")
@@ -13,7 +13,7 @@ var errSelectorNeedsTerminal = errors.New("interactive selection requires a term
 // selectItem resolves a selection from items. A query that narrows the list to
 // one entry is returned without opening the UI; otherwise the interactive
 // selector runs, which requires a terminal on both stdin and stdout.
-func selectItem(cmd *cobra.Command, app *App, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
+func selectItem(ctx context.Context, app *App, items []ui.Item, opts ui.SelectOptions) (ui.Item, error) {
 	item, done, err := ui.Resolve(items, opts.Query)
 	if err != nil {
 		return ui.Item{}, err
@@ -29,7 +29,7 @@ func selectItem(cmd *cobra.Command, app *App, items []ui.Item, opts ui.SelectOpt
 		opts.Width, opts.Height = width, height
 	}
 
-	item, err = app.Select(cmd.Context(), app.Stdin, app.Stdout, items, opts)
+	item, err = app.Select(ctx, app.Stdin, app.Stdout, items, opts)
 	if errors.Is(err, ui.ErrCancelled) {
 		return ui.Item{}, ExitError{Code: 130, Err: ui.ErrCancelled}
 	}

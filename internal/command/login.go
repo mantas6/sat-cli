@@ -29,14 +29,14 @@ even when configured. The token is always prompted for and replaced; use
 text, while token input from a terminal is hidden.`,
 		Args: cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
 			prompter := loginPrompter{
 				app:    app,
-				ctx:    cmd.Context(),
 				reader: bufio.NewReader(app.Stdin),
 			}
 
 			if !app.Config.HasBaseURL() || replaceURL || urlOnly {
-				if err := prompter.promptURL(); err != nil {
+				if err := prompter.promptURL(ctx); err != nil {
 					return err
 				}
 				if _, err := fmt.Fprintln(app.Stderr, "URL saved."); err != nil {
@@ -52,7 +52,7 @@ text, while token input from a terminal is hidden.`,
 					return err
 				}
 			}
-			if err := prompter.promptToken(); err != nil {
+			if err := prompter.promptToken(ctx); err != nil {
 				return err
 			}
 			_, err := fmt.Fprintln(app.Stderr, "Token saved.")
@@ -67,11 +67,10 @@ text, while token input from a terminal is hidden.`,
 
 type loginPrompter struct {
 	app    *App
-	ctx    context.Context
 	reader *bufio.Reader
 }
 
-func (p loginPrompter) promptURL() error {
+func (p loginPrompter) promptURL(ctx context.Context) error {
 	interactive := p.app.IsTTY(p.app.Stdin)
 	attempts := 1
 	if interactive {
@@ -80,7 +79,7 @@ func (p loginPrompter) promptURL() error {
 
 	var lastErr error
 	for range attempts {
-		value, err := p.readLine("Base URL: ")
+		value, err := p.readLine(ctx, "Base URL: ")
 		if err != nil {
 			return fmt.Errorf("read base URL: %w", err)
 		}
@@ -100,13 +99,13 @@ func (p loginPrompter) promptURL() error {
 	return lastErr
 }
 
-func (p loginPrompter) promptToken() error {
+func (p loginPrompter) promptToken(ctx context.Context) error {
 	var value string
 	if file, ok := p.app.Stdin.(*os.File); ok && p.app.IsTTY(file) {
 		if _, err := fmt.Fprint(p.app.Stderr, "Token: "); err != nil {
 			return err
 		}
-		password, err := p.readHiddenToken(int(file.Fd()))
+		password, err := p.readHiddenToken(ctx, int(file.Fd()))
 		// Terminate the "Token: " line so a cancelled prompt (or the hidden
 		// input) is not glued to the next shell prompt.
 		if _, writeErr := fmt.Fprintln(p.app.Stderr); writeErr != nil {
@@ -119,7 +118,7 @@ func (p loginPrompter) promptToken() error {
 			return fmt.Errorf("read token: %w", err)
 		}
 	} else {
-		line, err := p.readLine("Token: ")
+		line, err := p.readLine(ctx, "Token: ")
 		if err != nil {
 			return fmt.Errorf("read token: %w", err)
 		}
@@ -133,9 +132,9 @@ func (p loginPrompter) promptToken() error {
 // term.ReadPassword's deferred restore never runs while its blocking read is
 // stuck in the goroutine, capture the terminal state up front and restore it
 // ourselves when the context is cancelled.
-func (p loginPrompter) readHiddenToken(fd int) ([]byte, error) {
+func (p loginPrompter) readHiddenToken(ctx context.Context, fd int) ([]byte, error) {
 	state, stateErr := p.app.TerminalState(fd)
-	password, err := readWithContext(p.ctx, func() ([]byte, error) {
+	password, err := readWithContext(ctx, func() ([]byte, error) {
 		return p.app.ReadPassword(fd)
 	})
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -146,11 +145,11 @@ func (p loginPrompter) readHiddenToken(fd int) ([]byte, error) {
 	return password, err
 }
 
-func (p loginPrompter) readLine(prompt string) (string, error) {
+func (p loginPrompter) readLine(ctx context.Context, prompt string) (string, error) {
 	if _, err := fmt.Fprint(p.app.Stderr, prompt); err != nil {
 		return "", err
 	}
-	value, err := readWithContext(p.ctx, func() (string, error) {
+	value, err := readWithContext(ctx, func() (string, error) {
 		return p.reader.ReadString('\n')
 	})
 	if errors.Is(err, io.EOF) {

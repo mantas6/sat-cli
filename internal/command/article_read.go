@@ -32,7 +32,7 @@ func newArticleReadCommand(app *App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				item, err := selectItem(cmd, app, items, ui.SelectOptions{
+				item, err := selectItem(cmd.Context(), app, items, ui.SelectOptions{
 					Title: "Articles",
 					Query: strings.Join(args, " "),
 				})

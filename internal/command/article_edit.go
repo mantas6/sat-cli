@@ -29,9 +29,9 @@ func newArticleEditCommand(app *App) *cobra.Command {
 		Use:   "edit [query]",
 		Short: "Edit a journal article",
 		Args:  cobra.ArbitraryArgs,
-		RunE: func(command *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			rawID := strings.TrimSpace(id)
-			if command.Flags().Changed("id") && rawID == "" {
+			if cmd.Flags().Changed("id") && rawID == "" {
 				return errors.New("article ID must not be empty")
 			}
 
@@ -40,7 +40,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 				return err
 			}
 			if rawID == "" {
-				articles, err := client.ListArticles(command.Context(), false)
+				articles, err := client.ListArticles(cmd.Context(), false)
 				if err != nil {
 					return err
 				}
@@ -49,7 +49,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 					lines[index] = articleLine(article)
 				}
 				items := append([]ui.Item{{ID: newArticleItemID, Columns: []string{"New"}}}, reverseItems(parseArticleLines(lines))...)
-				item, err := selectItem(command, app, items, ui.SelectOptions{
+				item, err := selectItem(cmd.Context(), app, items, ui.SelectOptions{
 					Title: "Articles",
 					Query: strings.Join(args, " "),
 				})
@@ -57,7 +57,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 					return err
 				}
 				if item.ID == newArticleItemID {
-					return editArticle(command.Context(), command, app, client, 0, true)
+					return editArticle(cmd.Context(), app, client, 0, true)
 				}
 				rawID = item.ID
 			}
@@ -66,7 +66,7 @@ func newArticleEditCommand(app *App) *cobra.Command {
 				return err
 			}
 
-			return editArticle(command.Context(), command, app, client, articleID, false)
+			return editArticle(cmd.Context(), app, client, articleID, false)
 		},
 	}
 	command.Flags().StringVar(&id, "id", "", "article ID")
@@ -78,19 +78,19 @@ func newArticleNewCommand(app *App) *cobra.Command {
 		Use:   "new",
 		Short: "Create a journal article",
 		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, err := apiClient(app)
 			if err != nil {
 				return err
 			}
-			return editArticle(command.Context(), command, app, client, 0, true)
+			return editArticle(cmd.Context(), app, client, 0, true)
 		},
 	}
 }
 
 // editArticle opens the article with id in the editor, or an empty workspace
 // when isNew is true (id is then ignored).
-func editArticle(ctx context.Context, command *cobra.Command, app *App, client APIClient, id int, isNew bool) error {
+func editArticle(ctx context.Context, app *App, client APIClient, id int, isNew bool) error {
 	tmpDir, err := app.Config.TmpDir()
 	if err != nil {
 		return err
@@ -148,10 +148,10 @@ func editArticle(ctx context.Context, command *cobra.Command, app *App, client A
 	if err != nil {
 		return err
 	}
-	return assignArticle(ctx, command, app, client, savedID, "")
+	return assignArticle(ctx, app, client, savedID, "")
 }
 
-func assignArticle(ctx context.Context, command *cobra.Command, app *App, client APIClient, id int, journal string) error {
+func assignArticle(ctx context.Context, app *App, client APIClient, id int, journal string) error {
 	if journal == "" {
 		journals, err := client.ListJournals(ctx)
 		if err != nil {
@@ -164,7 +164,7 @@ func assignArticle(ctx context.Context, command *cobra.Command, app *App, client
 				items = append(items, ui.Item{ID: title, Columns: []string{title}})
 			}
 		}
-		item, err := selectItem(command, app, items, ui.SelectOptions{Title: "Journals"})
+		item, err := selectItem(ctx, app, items, ui.SelectOptions{Title: "Journals"})
 		if err != nil {
 			return err
 		}

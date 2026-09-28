@@ -21,13 +21,13 @@ func newArticleSaveCommand(app *App) *cobra.Command {
 		Short:  "Save an article editor workspace",
 		Args:   cobra.NoArgs,
 		Hidden: true,
-		RunE: func(command *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(workDir) == "" {
 				return errors.New("work directory must not be empty")
 			}
 			client, err := apiClient(app)
 			if err == nil {
-				_, err = saveArticle(command.Context(), app, client, workDir)
+				_, err = saveArticle(cmd.Context(), app, client, workDir)
 			}
 			if err != nil && hook {
 				// Vim's list-form system() is shell-free but only captures stdout.

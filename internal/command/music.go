@@ -18,8 +18,8 @@ func newMusicCommand(app *App) *cobra.Command {
 		// NoArgs rejects unknown subcommands; cobra only validates args of
 		// runnable commands, so RunE must stay to print help.
 		Args: cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			return command.Help()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
 		},
 	}
 	command.AddCommand(
@@ -79,7 +79,7 @@ func newMusicPlayCommand(app *App) *cobra.Command {
 				if !exists {
 					return errors.New("track cache is missing; run `sat music sync`")
 				}
-				item, err := selectItem(cmd, app, parseTrackLines(lines), ui.SelectOptions{
+				item, err := selectItem(cmd.Context(), app, parseTrackLines(lines), ui.SelectOptions{
 					Title: "Saved tracks",
 					Query: strings.Join(args, " "),
 				})
