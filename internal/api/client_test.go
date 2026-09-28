@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestClientMethods(t *testing.T) {
@@ -54,6 +55,9 @@ func TestClientMethods(t *testing.T) {
 		case "PUT /api/albums/play/track%2Fid", "PUT /api/albums/control/next":
 			writer.WriteHeader(http.StatusNoContent)
 		case "GET /api/dash":
+			if got := request.Header.Get("Accept"); got != "application/json, text/plain;q=0.9" {
+				t.Errorf("dashboard accept = %q", got)
+			}
 			_, _ = io.WriteString(writer, "dashboard\n")
 		default:
 			t.Errorf("unexpected request %s %s", request.Method, request.URL.EscapedPath())
@@ -279,42 +283,145 @@ func TestSpotifyErrorOnSuccessfulResponse(t *testing.T) {
 	}
 }
 
-func TestRedirectAuthorizationHandling(t *testing.T) {
-	var crossHostAuthorization string
-	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		crossHostAuthorization = request.Header.Get("Authorization")
-		_, _ = io.WriteString(writer, "cross-host")
+func TestAuthenticatedRequestsDoNotFollowRedirects(t *testing.T) {
+	var targetCalls int
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		targetCalls++
+		_, _ = io.WriteString(writer, "followed")
 	}))
 	defer target.Close()
 
-	var sourceAuthorization, sameHostAuthorization string
+	var endCalls int
 	source := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/same-start":
-			sourceAuthorization = request.Header.Get("Authorization")
+			http.Redirect(writer, request, "/same-end", http.StatusFound)
+		case "/cross-start":
+			http.Redirect(writer, request, target.URL+"/end", http.StatusFound)
+		case "/post-start":
 			http.Redirect(writer, request, "/same-end", http.StatusFound)
 		case "/same-end":
-			sameHostAuthorization = request.Header.Get("Authorization")
-			_, _ = io.WriteString(writer, "same-host")
-		case "/cross-start":
-			sourceAuthorization = request.Header.Get("Authorization")
-			http.Redirect(writer, request, target.URL+"/end", http.StatusFound)
+			endCalls++
+			_, _ = io.WriteString(writer, "followed")
 		}
 	}))
 	defer source.Close()
 
 	client := newTestClient(t, source.URL, "redirect-token")
-	if body, err := client.GetText(context.Background(), "/same-start", nil); err != nil || string(body) != "same-host" {
-		t.Fatalf("same-host redirect = %q, %v", body, err)
+	for name, call := range map[string]func() error{
+		"same host": func() error {
+			_, err := client.GetText(context.Background(), "/same-start", nil)
+			return err
+		},
+		"cross host": func() error {
+			_, err := client.GetText(context.Background(), "/cross-start", nil)
+			return err
+		},
+		"post": func() error {
+			_, err := client.PostForm(context.Background(), "/post-start", url.Values{"a": {"b"}})
+			return err
+		},
+		"json": func() error {
+			return client.SendJSON(context.Background(), http.MethodPut, "/same-start", map[string]string{"a": "b"}, nil)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			var httpError *HTTPError
+			if !errors.As(err, &httpError) || httpError.Status != http.StatusFound {
+				t.Fatalf("error = %T %v, want HTTP 302 HTTPError", err, err)
+			}
+		})
 	}
-	if sourceAuthorization != "Bearer redirect-token" || sameHostAuthorization != "Bearer redirect-token" {
-		t.Fatalf("same-host authorization = %q / %q", sourceAuthorization, sameHostAuthorization)
+	if targetCalls != 0 || endCalls != 0 {
+		t.Fatalf("redirect followed: target=%d same-host=%d", targetCalls, endCalls)
 	}
-	if body, err := client.GetText(context.Background(), "/cross-start", nil); err != nil || string(body) != "cross-host" {
-		t.Fatalf("cross-host redirect = %q, %v", body, err)
+}
+
+func TestUnauthenticatedRequestsFollowRedirects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/wt/Vilnius":
+			http.Redirect(writer, request, "/weather-end", http.StatusFound)
+		case "/weather-end":
+			_, _ = io.WriteString(writer, "sunny")
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "token")
+	weather, err := client.Weather(context.Background(), "Vilnius")
+	if err != nil || weather != "sunny" {
+		t.Fatalf("Weather() = %q, %v", weather, err)
 	}
-	if crossHostAuthorization != "" {
-		t.Fatalf("authorization forwarded to another host: %q", crossHostAuthorization)
+}
+
+func TestJSONEmptySuccessResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/no-content":
+			writer.WriteHeader(http.StatusNoContent)
+		case "/empty":
+			writer.WriteHeader(http.StatusOK)
+		case "/trailing":
+			_, _ = io.WriteString(writer, `{"result":"ok"}`+"\n\n")
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "token")
+	for _, path := range []string{"/no-content", "/empty", "/trailing"} {
+		t.Run(path, func(t *testing.T) {
+			var output struct {
+				Result string `json:"result"`
+			}
+			if err := client.GetJSON(context.Background(), path, nil, &output); err != nil {
+				t.Fatalf("GetJSON(%s) = %v", path, err)
+			}
+			if path == "/trailing" && output.Result != "ok" {
+				t.Fatalf("decoded output = %#v", output)
+			}
+		})
+	}
+}
+
+func TestHTTPErrorRedactsTokenStraddlingTruncation(t *testing.T) {
+	secret := "straddling-secret-token"
+	tests := map[string]string{
+		// The token starts just before the limit and ends past it.
+		"straddles limit": strings.Repeat("x", maxErrorBody-5) + secret + strings.Repeat("y", 2000),
+		// Earlier redactions shrink the body and pull a token that was only
+		// partially read into the kept window.
+		"partial after shrink": strings.Repeat(secret, 20) + strings.Repeat("z", maxErrorBody-20*len(secret)+2) + secret + strings.Repeat("y", 2000),
+		// Multi-byte runes must not be split by the cut.
+		"utf8 boundary": strings.Repeat("ž", 2000),
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(writer, body)
+			}))
+			defer server.Close()
+
+			client := newTestClient(t, server.URL, secret)
+			_, err := client.GetText(context.Background(), "/large", nil)
+			var httpError *HTTPError
+			if !errors.As(err, &httpError) {
+				t.Fatalf("error type = %T", err)
+			}
+			if !httpError.Truncated || len(httpError.Body) > maxErrorBody {
+				t.Fatalf("Truncated = %v, len(Body) = %d", httpError.Truncated, len(httpError.Body))
+			}
+			if !utf8.ValidString(httpError.Body) {
+				t.Fatalf("body is not valid UTF-8: %q", httpError.Body[len(httpError.Body)-8:])
+			}
+			for size := 4; size <= len(secret); size++ {
+				if strings.Contains(httpError.Body, secret[:size]) {
+					t.Fatalf("body leaks token prefix %q", secret[:size])
+				}
+			}
+		})
 	}
 }
 

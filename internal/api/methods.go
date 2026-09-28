@@ -80,11 +80,7 @@ func (c *Client) ControlPlayback(ctx context.Context, action string) error {
 }
 
 func (c *Client) spotifyRequest(ctx context.Context, path string) error {
-	request, err := c.newRequest(ctx, http.MethodPut, path, nil, nil, true)
-	if err != nil {
-		return err
-	}
-	data, err := c.doBytes(request, true)
+	data, err := c.doText(ctx, http.MethodPut, path, nil, true)
 	if err != nil {
 		return err
 	}
