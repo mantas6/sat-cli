@@ -16,13 +16,16 @@ const articleCacheName = "list"
 
 func init() {
 	registerCommand(newArticleCommand)
+	registerCommand(newArlCommand)
 }
 
 func newArticleCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
-		Use:     "article",
-		Aliases: []string{"arl"},
-		Short:   "Read and write journal articles",
+		Use:   "article",
+		Short: "Read and write journal articles",
+		// NoArgs rejects unknown subcommands; cobra only validates args of
+		// runnable commands, so RunE must stay to print help.
+		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return command.Help()
 		},
@@ -44,6 +47,16 @@ func parseArticleID(value string) (int, error) {
 		return 0, fmt.Errorf("invalid article ID %q", value)
 	}
 	return id, nil
+}
+
+// newArlCommand is the hidden top-level `sat arl` shortcut for
+// `sat article read`, matching the former arl script.
+func newArlCommand(app *App) *cobra.Command {
+	command := newArticleReadCommand(app)
+	command.Use = "arl [query]"
+	command.Aliases = nil
+	command.Hidden = true
+	return command
 }
 
 func articleLine(article api.Article) string {

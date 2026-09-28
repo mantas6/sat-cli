@@ -16,9 +16,10 @@ func newArticleReadCommand(app *App) *cobra.Command {
 	var id string
 	var raw bool
 	command := &cobra.Command{
-		Use:   "read [query]",
-		Short: "Read a journal article",
-		Args:  cobra.ArbitraryArgs,
+		Use:     "read [query]",
+		Aliases: []string{"arl"},
+		Short:   "Read a journal article",
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rawID := strings.TrimSpace(id)
 			if cmd.Flags().Changed("id") && rawID == "" {

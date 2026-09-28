@@ -174,9 +174,6 @@ Environment:
 		Version:       app.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(command *cobra.Command, _ []string) error {
-			return command.Help()
-		},
 	}
 	root.SetIn(app.Stdin)
 	root.SetOut(app.Stdout)

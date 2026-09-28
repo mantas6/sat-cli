@@ -19,6 +19,9 @@ func newMusicCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "music",
 		Short: "Play and control saved music",
+		// NoArgs rejects unknown subcommands; cobra only validates args of
+		// runnable commands, so RunE must stay to print help.
+		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return command.Help()
 		},
