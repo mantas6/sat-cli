@@ -203,6 +203,11 @@ func (c *fakeConfig) ReadCacheLines(name string) ([]string, bool, error) {
 }
 
 func (c *fakeConfig) WriteCacheLines(name string, lines []string) error {
+	for _, line := range lines {
+		if strings.ContainsAny(line, "\r\n") {
+			return errors.New("fakeConfig: cache line contains a line break")
+		}
+	}
 	if c.caches == nil {
 		c.caches = make(map[string][]string)
 	}

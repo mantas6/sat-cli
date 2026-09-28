@@ -50,7 +50,7 @@ func (s *Store) Dir() string {
 
 // BaseURL returns the validated server URL read from the configured URL path.
 func (s *Store) BaseURL() (string, error) {
-	value, err := s.readTrimmed(s.urlPath(), ErrBaseURLMissing)
+	value, err := s.readTrimmed(s.URLPath(), ErrBaseURLMissing)
 	if err != nil {
 		return "", err
 	}
@@ -60,7 +60,7 @@ func (s *Store) BaseURL() (string, error) {
 
 // Token returns the configured bearer token with surrounding whitespace removed.
 func (s *Store) Token() (string, error) {
-	return s.readTrimmed(s.tokenPath(), ErrTokenMissing)
+	return s.readTrimmed(s.TokenPath(), ErrTokenMissing)
 }
 
 // SetBaseURL validates and atomically persists a server URL.
@@ -70,7 +70,7 @@ func (s *Store) SetBaseURL(value string) error {
 		return err
 	}
 
-	return s.writeAtomic(s.urlPath(), []byte(value+"\n"))
+	return s.writeAtomic(s.URLPath(), []byte(value+"\n"))
 }
 
 // SetToken atomically persists a bearer token. A blank value is rejected with
@@ -81,36 +81,26 @@ func (s *Store) SetToken(value string) error {
 		return ErrEmptyToken
 	}
 
-	return s.writeAtomic(s.tokenPath(), []byte(value+"\n"))
+	return s.writeAtomic(s.TokenPath(), []byte(value+"\n"))
 }
 
-// HasBaseURL reports whether a non-empty URL file exists.
+// HasBaseURL reports whether a non-empty URL file can be read. The URL itself
+// is not validated; see BaseURL.
 func (s *Store) HasBaseURL() bool {
-	value, err := os.ReadFile(s.urlPath())
-	return err == nil && strings.TrimSpace(string(value)) != ""
+	_, err := s.readTrimmed(s.URLPath(), ErrBaseURLMissing)
+	return err == nil
 }
 
-// HasToken reports whether a non-empty token file exists.
+// HasToken reports whether a non-empty token file can be read.
 func (s *Store) HasToken() bool {
-	value, err := os.ReadFile(s.tokenPath())
-	return err == nil && strings.TrimSpace(string(value)) != ""
+	_, err := s.readTrimmed(s.TokenPath(), ErrTokenMissing)
+	return err == nil
 }
 
-// URLPath returns the file the base URL is read from and written to, honouring
-// the SAT_URL_PATH override.
+// URLPath returns the file the base URL is read from and written to. It
+// honours the SAT_URL_PATH override, falling back to the state directory's url
+// file.
 func (s *Store) URLPath() string {
-	return s.urlPath()
-}
-
-// TokenPath returns the file the token is read from and written to, honouring
-// the SAT_TOKEN_PATH override.
-func (s *Store) TokenPath() string {
-	return s.tokenPath()
-}
-
-// urlPath returns the file the base URL is read from and written to. It honours
-// the SAT_URL_PATH override, falling back to the state directory's url file.
-func (s *Store) urlPath() string {
 	if value := strings.TrimSpace(s.getenv("SAT_URL_PATH")); value != "" {
 		return value
 	}
@@ -118,9 +108,10 @@ func (s *Store) urlPath() string {
 	return s.path("url")
 }
 
-// tokenPath returns the file the token is read from and written to. It honours
-// the SAT_TOKEN_PATH override, falling back to the state directory's token file.
-func (s *Store) tokenPath() string {
+// TokenPath returns the file the token is read from and written to. It
+// honours the SAT_TOKEN_PATH override, falling back to the state directory's
+// token file.
+func (s *Store) TokenPath() string {
 	if value := strings.TrimSpace(s.getenv("SAT_TOKEN_PATH")); value != "" {
 		return value
 	}
@@ -135,11 +126,8 @@ func (s *Store) TmpDir() (string, error) {
 	}
 
 	path := s.path("tmp")
-	if err := os.MkdirAll(path, stateDirMode); err != nil {
-		return "", fmt.Errorf("create temporary state directory: %w", err)
-	}
-	if err := os.Chmod(path, stateDirMode); err != nil {
-		return "", fmt.Errorf("secure temporary state directory: %w", err)
+	if err := ensureDir(path); err != nil {
+		return "", err
 	}
 
 	return path, nil
@@ -168,10 +156,17 @@ func (s *Store) ReadCacheLines(name string) ([]string, bool, error) {
 	return strings.Split(text, "\n"), true, nil
 }
 
-// WriteCacheLines atomically writes a newline-delimited cache.
+// WriteCacheLines atomically writes a newline-delimited cache. A line that
+// contains a line break is rejected, since it would read back as several
+// records.
 func (s *Store) WriteCacheLines(name string, lines []string) error {
 	if err := validateCacheName(name); err != nil {
 		return err
+	}
+	for index, line := range lines {
+		if strings.ContainsAny(line, "\r\n") {
+			return fmt.Errorf("write cache %q: line %d contains a line break", name, index+1)
+		}
 	}
 
 	data := []byte(strings.Join(lines, "\n"))
@@ -220,6 +215,7 @@ func (s *Store) readTrimmed(path string, missing error) (string, error) {
 	return value, nil
 }
 
+// ensureDir creates dir if necessary and restricts it to its owner.
 func ensureDir(dir string) error {
 	if err := os.MkdirAll(dir, stateDirMode); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
@@ -231,11 +227,44 @@ func ensureDir(dir string) error {
 	return nil
 }
 
+// maxSymlinks bounds resolveSymlink, matching the Linux ELOOP limit.
+const maxSymlinks = 40
+
+// resolveSymlink follows path while it is a symbolic link and returns the
+// final, possibly not yet existing, file. Intermediate directories are left
+// alone; only the last component matters for a rename.
+func resolveSymlink(path string) (string, error) {
+	for range maxSymlinks {
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			// A missing file (or a dangling link's target) is created.
+			return path, nil
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", path, err)
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+
+	return "", fmt.Errorf("resolve %s: too many levels of symbolic links", path)
+}
+
 // writeAtomic replaces target via a private temporary file in the same
-// directory. Only the state directory itself is re-secured to 0700; parents of
-// SAT_URL_PATH/SAT_TOKEN_PATH overrides (for example $HOME or /tmp) are created
-// when missing but their existing permissions are left alone.
+// directory. When target is a symbolic link (for example a SAT_TOKEN_PATH
+// managed by a dotfiles repository), the file it points to is replaced and
+// the link is kept. Only the state directory itself is re-secured to 0700;
+// parents of SAT_URL_PATH/SAT_TOKEN_PATH overrides (for example $HOME or
+// /tmp) are created when missing but their existing permissions are left
+// alone.
 func (s *Store) writeAtomic(target string, data []byte) (err error) {
+	target, err = resolveSymlink(target)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(target)
 	if filepath.Clean(dir) == filepath.Clean(s.dir) {
 		if err := ensureDir(dir); err != nil {

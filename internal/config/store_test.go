@@ -366,6 +366,108 @@ func TestCacheLifecycleAndSplitTabs(t *testing.T) {
 	}
 }
 
+func TestWriteCacheLinesRejectsLineBreaks(t *testing.T) {
+	store := NewStore(t.TempDir(), mapEnv(nil))
+	for _, line := range []string{"a\nb", "a\rb", "trailing\n"} {
+		if err := store.WriteCacheLines("tracks", []string{"ok", line}); err == nil || !strings.Contains(err.Error(), "line 2") {
+			t.Fatalf("WriteCacheLines(%q) = %v, want line break error for line 2", line, err)
+		}
+	}
+	if _, exists, err := store.ReadCacheLines("tracks"); err != nil || exists {
+		t.Fatalf("rejected cache was written: exists=%v, err=%v", exists, err)
+	}
+}
+
+func TestWriteThroughSymlinkKeepsLink(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	linkTarget := filepath.Join(dir, "dotfiles", "sat-token")
+	if err := os.MkdirAll(filepath.Dir(linkTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(linkTarget, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A relative, two-level chain: token -> link -> ../dotfiles/sat-token.
+	links := filepath.Join(dir, "links")
+	if err := os.MkdirAll(links, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../dotfiles/sat-token", filepath.Join(links, "link")); err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(links, "token")
+	if err := os.Symlink("link", tokenPath); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(stateDir, mapEnv(map[string]string{"SAT_TOKEN_PATH": tokenPath}))
+	if err := store.SetToken("new"); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(tokenPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("token path is no longer a symlink: %v, %v", info, err)
+	}
+	if data, err := os.ReadFile(linkTarget); err != nil || string(data) != "new\n" {
+		t.Fatalf("link target = %q, %v; want new token", data, err)
+	}
+	assertPerm(t, linkTarget, 0o600)
+	assertPerm(t, filepath.Dir(linkTarget), 0o755)
+	if token, err := store.Token(); err != nil || token != "new" {
+		t.Fatalf("Token() = %q, %v", token, err)
+	}
+}
+
+func TestWriteThroughDanglingSymlinkCreatesTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target-url")
+	urlPath := filepath.Join(dir, "url")
+	if err := os.Symlink(target, urlPath); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(filepath.Join(dir, "state"), mapEnv(map[string]string{"SAT_URL_PATH": urlPath}))
+	if err := store.SetBaseURL("https://sat.example"); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(urlPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("url path is no longer a symlink: %v, %v", info, err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "https://sat.example\n" {
+		t.Fatalf("link target = %q, %v", data, err)
+	}
+}
+
+func TestWriteThroughSymlinkLoopFails(t *testing.T) {
+	dir := t.TempDir()
+	loop := filepath.Join(dir, "loop")
+	if err := os.Symlink("loop", loop); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(filepath.Join(dir, "state"), mapEnv(map[string]string{"SAT_TOKEN_PATH": loop}))
+	if err := store.SetToken("token"); err == nil || !strings.Contains(err.Error(), "symbolic links") {
+		t.Fatalf("SetToken() = %v, want symlink loop error", err)
+	}
+}
+
+func TestTmpDirResecuresExistingDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tmp, err := NewStore(dir, mapEnv(nil)).TmpDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPerm(t, dir, 0o700)
+	assertPerm(t, tmp, 0o700)
+}
+
 func TestCacheNameValidation(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir, mapEnv(nil))
