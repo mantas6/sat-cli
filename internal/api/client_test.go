@@ -86,9 +86,17 @@ func TestClientMethods(t *testing.T) {
 			want:    []Journal{{ID: 3, Title: "Work"}},
 		},
 		{
-			name: "SavedTracks", request: "GET /api/albums/saved", accept: "application/json",
+			name: "SavedTracks legacy array", request: "GET /api/albums/saved", accept: "application/json",
 			respond: func(writer http.ResponseWriter) {
 				_, _ = io.WriteString(writer, `[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]`)
+			},
+			call: func(ctx context.Context, c *Client) (any, error) { return c.SavedTracks(ctx) },
+			want: []string{"track-id\tartist\t/album\t/01.\ttitle"},
+		},
+		{
+			name: "SavedTracks data envelope", request: "GET /api/albums/saved", accept: "application/json",
+			respond: func(writer http.ResponseWriter) {
+				_, _ = io.WriteString(writer, `{"data":[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]}`)
 			},
 			call: func(ctx context.Context, c *Client) (any, error) { return c.SavedTracks(ctx) },
 			want: []string{"track-id\tartist\t/album\t/01.\ttitle"},

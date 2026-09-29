@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -87,10 +89,33 @@ func (c *Client) ListJournals(ctx context.Context) ([]Journal, error) {
 }
 
 // SavedTracks returns the legacy tab-delimited saved-track lines.
+//
+// Newer satellites wrap the collection in a {"data": [...]} envelope while
+// older ones return a bare array, so both shapes are accepted.
 func (c *Client) SavedTracks(ctx context.Context) ([]string, error) {
-	var tracks []savedTrack
-	if err := c.getJSON(ctx, "/api/albums/saved", nil, &tracks); err != nil {
+	var raw json.RawMessage
+	if err := c.getJSON(ctx, "/api/albums/saved", nil, &raw); err != nil {
 		return nil, err
+	}
+
+	var tracks []savedTrack
+	body := bytes.TrimSpace(raw)
+	switch {
+	case len(body) == 0:
+		// Empty success body: no tracks.
+	case body[0] == '[':
+		// Legacy bare array from a satellite without the wrapping change.
+		if err := json.Unmarshal(body, &tracks); err != nil {
+			return nil, fmt.Errorf("GET /api/albums/saved: decode response: %w", err)
+		}
+	default:
+		var payload struct {
+			Data []savedTrack `json:"data"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return nil, fmt.Errorf("GET /api/albums/saved: decode response: %w", err)
+		}
+		tracks = payload.Data
 	}
 
 	lines := make([]string, len(tracks))
