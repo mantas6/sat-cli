@@ -9,6 +9,7 @@ collection of shell scripts (`arl`, `arr`, `ara`, `arw`, `dashb`, `sat-play`,
 ```text
 sat auth                                      # show authentication status
 sat auth login [--replace-url] [--url-only]
+sat auth get-url                              # print the base URL, for scripts
 
 sat article read [query] [--id ID] [--raw]   # alias: sat arl
 sat article edit [query] [--id ID]
@@ -70,11 +71,13 @@ State lives in the first of `$SAT_JOURNAL_STATE`, `$XDG_STATE_HOME/sat`,
 `~/.local/state/sat`. `sat auth login` stores the base URL and token there, and
 `sat auth` prints the current authentication status (state directory, base URL,
 URL and token file paths, and whether a token is configured) without ever
-revealing the token value. `SAT_URL_PATH` and `SAT_TOKEN_PATH` override where the
-base URL and token are read from and written to; when set, `sat auth` annotates
-the affected paths with `(from SAT_URL_PATH)` / `(from SAT_TOKEN_PATH)`. Existing
-state files from the shell scripts (`url`, `token`, `list`, `tracks`,
-`tmp/`) are reused.
+revealing the token value. `sat auth get-url` prints only the base URL and a
+newline, for scripts such as `curl "$(sat auth get-url)/api/..."`; it prints
+nothing to stdout and exits non-zero when no URL is configured. `SAT_URL_PATH`
+and `SAT_TOKEN_PATH` override where the base URL and token are read from and
+written to; when set, `sat auth` annotates the affected paths with
+`(from SAT_URL_PATH)` / `(from SAT_TOKEN_PATH)`. Existing state files from the
+shell scripts (`url`, `token`, `list`, `tracks`, `tmp/`) are reused.
 
 Two picker caches live in the state directory:
 

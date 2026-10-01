@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,5 +137,52 @@ func TestLoginMovedUnderAuth(t *testing.T) {
 	}
 	if cmd.Name() != "login" {
 		t.Fatalf("auth login resolved to %q, want login", cmd.Name())
+	}
+}
+
+func TestAuthGetURLConfigured(t *testing.T) {
+	t.Parallel()
+	cfg := newFakeConfig(t)
+	cfg.baseURL = "https://sat.example"
+	app, stdout, stderr := newTestApp(t, withConfig(cfg))
+
+	if err := run(t, app, "auth", "get-url"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "https://sat.example\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestAuthGetURLUnconfigured(t *testing.T) {
+	t.Parallel()
+	cfg := newFakeConfig(t)
+	cfg.baseURL = ""
+	app, stdout, _ := newTestApp(t, withConfig(cfg))
+
+	err := run(t, app, "auth", "get-url")
+	if !errors.Is(err, config.ErrBaseURLMissing) {
+		t.Fatalf("error = %v, want ErrBaseURLMissing", err)
+	}
+	if !strings.HasSuffix(err.Error(), "; "+loginHint) {
+		t.Fatalf("error = %q, want login hint", err)
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+}
+
+func TestAuthGetURLRejectsArgs(t *testing.T) {
+	t.Parallel()
+	app, stdout, _ := newTestApp(t)
+
+	if err := run(t, app, "auth", "get-url", "extra"); err == nil {
+		t.Fatal("expected an error for an unexpected argument")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
 	}
 }
