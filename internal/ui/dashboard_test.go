@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +95,49 @@ func TestDashboardModelRebuildsLinesOnlyWhenTextOrWidthChanges(t *testing.T) {
 	model.Update(fetchResultMsg{text: "three"})
 	if got := model.View().Content; got != "th" {
 		t.Fatalf("View() after new text = %q, want th", got)
+	}
+}
+
+// requestsClearScreen reports whether command, run to completion, includes
+// tea.ClearScreen.
+func requestsClearScreen(command tea.Cmd) bool {
+	if command == nil {
+		return false
+	}
+	switch message := command().(type) {
+	case tea.BatchMsg:
+		for _, child := range message {
+			if requestsClearScreen(child) {
+				return true
+			}
+		}
+		return false
+	default:
+		return fmt.Sprintf("%T", message) == fmt.Sprintf("%T", tea.ClearScreen())
+	}
+}
+
+func TestDashboardModelRepaintsFullScreenOnlyWhenDisplayChanges(t *testing.T) {
+	t.Parallel()
+	model := newTestDashboard(DashboardOptions{})
+
+	steps := []struct {
+		name    string
+		message fetchResultMsg
+		repaint bool
+	}{
+		{"first load", fetchResultMsg{text: "one"}, false},
+		{"same text", fetchResultMsg{text: "one"}, false},
+		{"new text", fetchResultMsg{text: "two"}, true},
+		{"failure shows badge", fetchResultMsg{err: errors.New("down")}, true},
+		{"failure again", fetchResultMsg{err: errors.New("down")}, false},
+		{"recovery hides badge", fetchResultMsg{text: "two"}, true},
+	}
+	for _, step := range steps {
+		_, command := model.Update(step.message)
+		if got := requestsClearScreen(command); got != step.repaint {
+			t.Fatalf("%s: full repaint = %v, want %v", step.name, got, step.repaint)
+		}
 	}
 }
 

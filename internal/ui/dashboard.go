@@ -122,6 +122,7 @@ func (m *dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardTickMsg:
 		return m, m.fetchDashboard()
 	case fetchResultMsg:
+		wasLoaded, hadError, oldText := m.loaded, m.hasError, m.text
 		m.loaded = true
 		if message.err != nil {
 			m.hasError = true
@@ -132,7 +133,16 @@ func (m *dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.lines = dashboardLines(m.text, m.width)
 			}
 		}
-		return m, m.tick(m.interval)
+		tick := m.tick(m.interval)
+		// Repaint the whole screen whenever the content changes instead of
+		// letting the renderer send a diff. Diffs assume the terminal still
+		// matches the last frame; once something else touches the tty (a
+		// stray write, a termios reset) every later diff lands in the wrong
+		// place and the corruption never clears.
+		if wasLoaded && (m.text != oldText || m.hasError != hadError) {
+			return m, tea.Batch(tick, tea.ClearScreen)
+		}
+		return m, tick
 	}
 	return m, nil
 }
