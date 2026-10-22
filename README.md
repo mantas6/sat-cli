@@ -20,6 +20,8 @@ sat music play [query] [--id ID]
 sat music pause|resume|next|previous
 
 sat dashboard [-f|--follow [5s]]              # alias: dash
+sat machine list [--json] [-f|--follow [5s]]  # alias: sat machines ls
+sat machine show [name] [--json|--raw] [-f|--follow [5s]]
 sat weather [place]                           # alias: wt
 sat notify MESSAGE
 sat run [artisan arguments...]
@@ -32,6 +34,25 @@ Run `sat <command> --help` for details. `sat arl` is short for
 
 Interactive pickers are fzf-style: the prompt sits at the bottom, the best match
 appears directly above it, and `up` moves away from the prompt.
+
+### Machines
+
+Machines report their system stats to Satellite. `sat machine list` prints
+every machine sorted by name with its online state and latest readings; on a
+narrow terminal the less important columns are dropped, and piped output keeps
+all columns without colour. `sat machine show NAME` prints one machine's full
+report; the name must match exactly, and without one `show` opens a picker on a
+terminal. Machine names complete in the shell once the completion script is
+loaded. A machine is online when it reported within the last two minutes, and
+memory or disk usage at or above 85% is flagged as high: `!` in the list,
+`(high)` in the report.
+
+`--json` prints the `data` value of the API response, unrounded, for scripts
+and `jq`; `--raw` prints only the stats modules the machine reported. `--follow`
+refreshes the view like `sat dashboard --follow`; give the interval after the
+name (`sat machine show alpha -f 10s`), or as `--follow=10s` when using the
+picker, since a single argument is always the name. The API token needs
+permission to inspect machines; the API answers HTTP 403 otherwise.
 
 ## Install
 
@@ -88,11 +109,12 @@ Two picker caches live in the state directory:
   written by `sat music sync`, which must run before the first `sat music play`
   without `--id`.
 
-Journals are always fetched on demand and never cached.
+Journals and machines are always fetched on demand and never cached.
 
 `sat --help` lists the environment variables sat honours: `SAT_JOURNAL_STATE`,
-`XDG_STATE_HOME`, `SAT_URL_PATH`, `SAT_TOKEN_PATH`, `REMOTE_HOST`, `REMOTE_USER`
-and `REMOTE_ROOT`.
+`XDG_STATE_HOME`, `SAT_URL_PATH`, `SAT_TOKEN_PATH`, `REMOTE_HOST`,
+`REMOTE_USER`, `REMOTE_ROOT` and `NO_COLOR` (disables colours in `sat machine`
+output).
 
 `sat run` honours `REMOTE_HOST`, `REMOTE_USER` and `REMOTE_ROOT`, falling back
 to a host derived from the base URL and `$HOME/Sat/current` on the remote. It
