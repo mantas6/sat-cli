@@ -86,6 +86,29 @@ func TestClientMethods(t *testing.T) {
 			want:    []Journal{{ID: 3, Title: "Work"}},
 		},
 		{
+			name: "ListMachines", request: "GET /api/machines", accept: "application/json",
+			respond: func(writer http.ResponseWriter) {
+				_, _ = io.WriteString(writer, `{"data": [ {"name": "alpha", "online": true,  "cpu": {"usage_percentage": 12.50}} ]}`)
+			},
+			call: func(ctx context.Context, c *Client) (any, error) { return c.ListMachines(ctx) },
+			want: []Machine{{
+				Name: "alpha", Online: true, CPU: MachineCPU{UsagePercentage: new(12.5)},
+				Raw: json.RawMessage(`{"name": "alpha", "online": true,  "cpu": {"usage_percentage": 12.50}}`),
+			}},
+		},
+		{
+			name: "GetMachine escapes the name", request: "GET /api/machines/web%2001", accept: "application/json",
+			respond: func(writer http.ResponseWriter) {
+				_, _ = io.WriteString(writer, `{"data":{"name":"web 01","stats":[{"type":"cpu","result":{"usage":1}}]}}`)
+			},
+			call: func(ctx context.Context, c *Client) (any, error) { return c.GetMachine(ctx, "web 01") },
+			want: Machine{
+				Name:  "web 01",
+				Stats: []MachineStat{{Type: "cpu", Result: json.RawMessage(`{"usage":1}`)}},
+				Raw:   json.RawMessage(`{"name":"web 01","stats":[{"type":"cpu","result":{"usage":1}}]}`),
+			},
+		},
+		{
 			name: "SavedTracks legacy array", request: "GET /api/albums/saved", accept: "application/json",
 			respond: func(writer http.ResponseWriter) {
 				_, _ = io.WriteString(writer, `[{"line":"track-id\tartist\t/album\t/01.\ttitle"}]`)
@@ -772,6 +795,11 @@ func TestInvalidIDsAndActionsNeverReachTheServer(t *testing.T) {
 		"PlayTrack dot dot":     func() error { return client.PlayTrack(ctx, "..") },
 		"ControlPlayback bogus": func() error { return client.ControlPlayback(ctx, PlaybackAction("..")) },
 		"Weather dot dot":       func() error { _, err := client.Weather(ctx, ".."); return err },
+		"GetMachine empty":      func() error { _, err := client.GetMachine(ctx, ""); return err },
+		"GetMachine dot":        func() error { _, err := client.GetMachine(ctx, "."); return err },
+		"GetMachine dot dot":    func() error { _, err := client.GetMachine(ctx, ".."); return err },
+		"GetMachine slash":      func() error { _, err := client.GetMachine(ctx, "a/b"); return err },
+		"GetMachine backslash":  func() error { _, err := client.GetMachine(ctx, `a\b`); return err },
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {

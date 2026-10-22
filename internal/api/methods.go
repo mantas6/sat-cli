@@ -88,6 +88,32 @@ func (c *Client) ListJournals(ctx context.Context) ([]Journal, error) {
 	return journals, err
 }
 
+func machinePath(name string) (string, error) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid machine name %q", name)
+	}
+	return joinPath("api", "machines", name)
+}
+
+// ListMachines returns every machine sorted by name, without stats modules.
+func (c *Client) ListMachines(ctx context.Context) ([]Machine, error) {
+	var machines []Machine
+	err := c.getData(ctx, "/api/machines", &machines)
+	return machines, err
+}
+
+// GetMachine returns a machine by its exact name, including its stats modules.
+// An unknown name fails with an error matching ErrNotFound.
+func (c *Client) GetMachine(ctx context.Context, name string) (Machine, error) {
+	path, err := machinePath(name)
+	if err != nil {
+		return Machine{}, err
+	}
+	var machine Machine
+	err = c.getData(ctx, path, &machine)
+	return machine, err
+}
+
 // SavedTracks returns the legacy tab-delimited saved-track lines.
 //
 // Newer satellites wrap the collection in a {"data": [...]} envelope while

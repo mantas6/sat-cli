@@ -121,6 +121,32 @@ func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out
 	return c.doJSON(ctx, http.MethodGet, path, query, nil, out, true)
 }
 
+// getData performs an authenticated GET request and decodes the data value of
+// the API's {"data": ...} envelope into out. An empty body, a missing or null
+// data value and a bare array are decode errors.
+func (c *Client) getData(ctx context.Context, path string, out any) error {
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := c.getJSON(ctx, path, nil, &envelope); err != nil {
+		return err
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return c.decodeError(path, errors.New("missing data"))
+	}
+	if err := json.Unmarshal(envelope.Data, out); err != nil {
+		return c.decodeError(path, err)
+	}
+
+	return nil
+}
+
+// decodeError formats err like requestError for a GET response of path that
+// was received but could not be decoded.
+func (c *Client) decodeError(path string, err error) error {
+	return fmt.Errorf("%s %s: decode response: %w", http.MethodGet, c.escapedPath(path), err)
+}
+
 // sendJSON performs an authenticated JSON request and decodes its JSON response.
 func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {
 	return c.doJSON(ctx, method, path, nil, body, out, true)
@@ -224,7 +250,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, query url.
 
 func (c *Client) resolve(path string, query url.Values) (string, error) {
 	resolved := *c.baseURL
-	rawPath := strings.TrimSuffix(c.baseURL.EscapedPath(), "/") + "/" + strings.TrimPrefix(path, "/")
+	rawPath := c.escapedPath(path)
 	unescapedPath, err := url.PathUnescape(rawPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve API path %q: %w", path, err)
@@ -234,6 +260,12 @@ func (c *Client) resolve(path string, query url.Values) (string, error) {
 	resolved.RawQuery = query.Encode()
 
 	return resolved.String(), nil
+}
+
+// escapedPath returns the escaped request path for an API path below the base
+// URL.
+func (c *Client) escapedPath(path string) string {
+	return strings.TrimSuffix(c.baseURL.EscapedPath(), "/") + "/" + strings.TrimPrefix(path, "/")
 }
 
 func (c *Client) doBytes(request *http.Request, authenticated bool) ([]byte, error) {
