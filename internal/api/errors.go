@@ -15,6 +15,9 @@ var (
 	// ErrForbidden matches an *HTTPError for an HTTP 403 response: the token
 	// lacks the ability the endpoint requires.
 	ErrForbidden = errors.New("forbidden")
+	// ErrNotFound matches an *HTTPError for an HTTP 404 response: the requested
+	// resource does not exist.
+	ErrNotFound = errors.New("not found")
 )
 
 // HTTPError describes a non-success HTTP response.
@@ -62,6 +65,8 @@ func (e *HTTPError) Is(target error) bool {
 		return e.StatusCode == http.StatusUnauthorized
 	case ErrForbidden:
 		return e.StatusCode == http.StatusForbidden
+	case ErrNotFound:
+		return e.StatusCode == http.StatusNotFound
 	}
 	return false
 }

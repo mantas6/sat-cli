@@ -239,6 +239,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 	}{
 		{http.StatusUnauthorized, `{"message":"bad credentials"}`, "bad credentials; token is invalid or expired", ErrUnauthorized},
 		{http.StatusForbidden, `{"message":"ability denied"}`, "ability denied; token lacks the required ability", ErrForbidden},
+		{http.StatusNotFound, `{"message":"No such resource."}`, "HTTP 404 Not Found: No such resource.", ErrNotFound},
 		{http.StatusUnprocessableEntity, `{"message":"The contents field is required."}`, "The contents field is required.", nil},
 		{http.StatusInternalServerError, "server exploded", "server exploded", nil},
 	}
@@ -261,13 +262,14 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 			if httpError.StatusCode != test.status || httpError.Method != http.MethodGet || httpError.Path != "/failure" {
 				t.Fatalf("HTTPError = %#v", httpError)
 			}
-			if !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %q, want %q", err, test.want)
+			// HasSuffix also asserts that no hint follows the expected text.
+			if !strings.HasSuffix(err.Error(), test.want) {
+				t.Fatalf("error = %q, want suffix %q", err, test.want)
 			}
 			if strings.Contains(err.Error(), "sat auth login") {
 				t.Fatalf("error = %q, want no CLI hint from the api package", err)
 			}
-			for _, sentinel := range []error{ErrUnauthorized, ErrForbidden} {
+			for _, sentinel := range []error{ErrUnauthorized, ErrForbidden, ErrNotFound} {
 				if got, want := errors.Is(err, sentinel), sentinel == test.sentinel; got != want {
 					t.Fatalf("errors.Is(err, %v) = %v, want %v", sentinel, got, want)
 				}
