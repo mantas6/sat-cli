@@ -29,7 +29,8 @@ func newMachineShowCommand(app *App) *cobra.Command {
 			"With --follow, the machine is refreshed in a full-screen terminal. An optional duration " +
 			"may follow the name, for example `sat machine show web-1 --follow 10s`; without a name, " +
 			"use `sat machine show --follow=10s`, because a single argument is always the name.",
-		Args: cobra.RangeArgs(0, 2),
+		Args:              cobra.RangeArgs(0, 2),
+		ValidArgsFunction: completeMachineNames(app),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
 			if len(args) > 0 {

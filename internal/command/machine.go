@@ -13,6 +13,10 @@ import (
 
 var errMachineFollowNeedsTerminal = errors.New("machine follow mode requires a terminal on stdin and stdout")
 
+// machineCompletionTimeout bounds the request made while completing machine
+// names, so a slow API does not stall the shell.
+const machineCompletionTimeout = 2 * time.Second
+
 func newMachineCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:     "machine",
@@ -46,6 +50,8 @@ func newMachineListCommand(app *App) *cobra.Command {
 			"With --follow, the list is refreshed in a full-screen terminal. An optional positional " +
 			"duration may be used, for example `sat machine list --follow 10s`.",
 		Args: cobra.MaximumNArgs(1),
+		// The only positional is a duration, so offer neither names nor files.
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			following := cmd.Flags().Changed("follow")
 			if err := checkMachineFollow(app, following, &follow, args); err != nil {
@@ -126,6 +132,47 @@ func checkMachineFollow(app *App, following bool, interval *time.Duration, args 
 		return errMachineFollowNeedsTerminal
 	}
 	return nil
+}
+
+// completeMachineNames offers the names of all known machines, described as
+// online or offline, for the first positional argument. The second positional
+// is a duration and gets no completions. Any failure, such as missing
+// credentials, an HTTP error or the timeout, yields no completions and prints
+// nothing, since the output is read by the shell.
+func completeMachineNames(app *App) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, _ string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(ctx, machineCompletionTimeout)
+		defer cancel()
+
+		client, err := apiClient(app)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		machines, err := client.ListMachines(ctx)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		completions := make([]cobra.Completion, 0, len(machines))
+		for _, machine := range machines {
+			name := plainText(machine.Name)
+			if name == "" {
+				continue
+			}
+			status := "offline"
+			if machine.Online {
+				status = "online"
+			}
+			completions = append(completions, cobra.CompletionWithDesc(name, status))
+		}
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 // machineJSON returns the machine object as the API sent it, or the decoded

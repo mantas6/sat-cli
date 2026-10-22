@@ -840,3 +840,74 @@ func TestMachineListFollowStartupFailure(t *testing.T) {
 		t.Fatalf("ListMachines calls = %d, want 1", calls)
 	}
 }
+
+func TestMachineCompletion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("names", func(t *testing.T) {
+		t.Parallel()
+		machines := machineFixtures(t)
+		machines = append(machines, api.Machine{Name: "\x1b[31mgam\tma\x1b[0m", Online: true}, api.Machine{Name: "\x1b[0m"})
+		var hasDeadline bool
+		client := &fakeAPI{listMachines: func(ctx context.Context) ([]api.Machine, error) {
+			_, hasDeadline = ctx.Deadline()
+			return machines, nil
+		}}
+		app, stdout, _ := newTestApp(t, withAPI(client))
+		if err := run(t, app, "__complete", "machine", "show", ""); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := stdout.String(), "alpha\tonline\nbeta\toffline\ngamma\tonline\n:4\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		if !hasDeadline {
+			t.Fatal("ListMachines context has no deadline")
+		}
+	})
+
+	forbidden := &api.HTTPError{StatusCode: http.StatusForbidden, Method: http.MethodGet, Path: "/api/machines"}
+	tests := []struct {
+		name      string
+		args      []string
+		config    *fakeConfig
+		err       error
+		wantCalls int
+	}{
+		{name: "name given", args: []string{"machine", "show", "alpha", ""}},
+		{name: "list interval", args: []string{"machine", "list", ""}},
+		{name: "API error", args: []string{"machine", "show", ""}, err: forbidden, wantCalls: 1},
+		{name: "timeout", args: []string{"machine", "show", ""}, err: context.DeadlineExceeded, wantCalls: 1},
+		{name: "missing token", args: []string{"machine", "show", ""}, config: &fakeConfig{baseURL: "https://satellite.test"}},
+		{name: "missing base URL", args: []string{"machine", "show", ""}, config: &fakeConfig{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			client := &fakeAPI{listMachines: func(context.Context) ([]api.Machine, error) {
+				calls++
+				if test.err != nil {
+					return nil, test.err
+				}
+				return machineFixtures(t), nil
+			}}
+			app, stdout, stderr := newTestApp(t, withAPI(client))
+			if test.config != nil {
+				app.Config = test.config
+			}
+			if err := run(t, app, append([]string{"__complete"}, test.args...)...); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != ":4\n" {
+				t.Fatalf("stdout = %q, want only the no-file directive", got)
+			}
+			if calls != test.wantCalls {
+				t.Fatalf("ListMachines calls = %d, want %d", calls, test.wantCalls)
+			}
+			// cobra reports the directive on stderr; nothing else may appear.
+			if got, want := stderr.String(), "Completion ended with directive: ShellCompDirectiveNoFileComp\n"; got != want {
+				t.Fatalf("stderr = %q, want %q", got, want)
+			}
+		})
+	}
+}
