@@ -154,14 +154,6 @@ func TestMachineListOnTerminal(t *testing.T) {
 	})
 }
 
-func TestMachineListRejectsArguments(t *testing.T) {
-	t.Parallel()
-	app, _, _ := newTestApp(t)
-	if err := run(t, app, "machine", "list", "alpha"); err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("Execute(machine list alpha) error = %v, want unknown command", err)
-	}
-}
-
 func TestMachineErrors(t *testing.T) {
 	t.Parallel()
 	httpError := func(status int) *api.HTTPError {
@@ -441,8 +433,7 @@ func TestMachineShowValidation(t *testing.T) {
 	}{
 		{args: []string{"  "}, want: "machine name must not be empty"},
 		{args: []string{""}, want: "machine name must not be empty"},
-		{args: []string{"alpha", "--json", "--raw"}, want: "if any flags in the group [json raw] are set none of the others can be"},
-		{args: []string{"alpha", "beta"}, want: "accepts at most 1 arg(s), received 2"},
+		{args: []string{"alpha", "--json", "--raw"}, want: "if any flags in the group [json raw follow] are set none of the others can be"},
 	}
 	for _, test := range tests {
 		client := &fakeAPI{getMachine: func(context.Context, string) (api.Machine, error) {
@@ -541,5 +532,311 @@ func TestMachineShowPickerWithoutMachines(t *testing.T) {
 	app, _, _ := newTestApp(t, withAPI(listMachines(nil)), withTTY(), withRealSelect())
 	if err := run(t, app, "machine", "show"); !errors.Is(err, ui.ErrNoItems) {
 		t.Fatalf("err = %v, want ui.ErrNoItems", err)
+	}
+}
+
+// followOnce returns a Follow stub that records its options, switches the
+// terminal to width columns and calls the fetcher once, storing its text.
+func followOnce(app *App, width int, gotOpts *ui.DashboardOptions, gotText *string) FollowFunc {
+	return func(ctx context.Context, _ io.Reader, _ io.Writer, fetch ui.Fetcher, opts ui.DashboardOptions) error {
+		*gotOpts = opts
+		app.TermSize = func() (int, int, bool) { return width, 40, true }
+		text, err := fetch(ctx)
+		*gotText = text
+		return err
+	}
+}
+
+func TestMachineShowFollowWiring(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		args   []string
+		picker bool
+		want   time.Duration
+	}{
+		{name: "flag without value", args: []string{"machine", "show", "alpha", "--follow"}, want: 5 * time.Second},
+		{name: "short flag and positional interval", args: []string{"machine", "show", "alpha", "-f", "10s"}, want: 10 * time.Second},
+		{name: "equals value", args: []string{"machines", "show", "alpha", "--follow=10s"}, want: 10 * time.Second},
+		{name: "picker", args: []string{"machine", "show", "--follow"}, picker: true, want: 5 * time.Second},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			machines := machineFixtures(t)
+			var names []string
+			var deadlines []bool
+			client := getMachine(t, machines, nil)
+			lookup := client.getMachine
+			client.getMachine = func(ctx context.Context, name string) (api.Machine, error) {
+				names = append(names, name)
+				_, ok := ctx.Deadline()
+				deadlines = append(deadlines, ok)
+				return lookup(ctx, name)
+			}
+			app, stdout, _ := newTestApp(t, withAPI(client), withMachineNow(), withTTY())
+			app.TermSize = func() (int, int, bool) { return 120, 40, true }
+			if test.picker {
+				app.Select = selectIndex(0, nil, nil)
+			}
+			var gotOpts ui.DashboardOptions
+			var gotText string
+			app.Follow = followOnce(app, 90, &gotOpts, &gotText)
+
+			if err := run(t, app, test.args...); err != nil {
+				t.Fatal(err)
+			}
+			want := ui.DashboardOptions{Size: ui.Size{Width: 120, Height: 40}, Interval: test.want, Label: "machine alpha"}
+			if gotOpts != want {
+				t.Fatalf("follow options = %#v, want %#v", gotOpts, want)
+			}
+			// The fetcher reads the terminal width on every refresh.
+			if wantText := formatMachine(machines[0], machineView{Now: machineNow, Color: true, Width: 90}); gotText != wantText {
+				t.Fatalf("fetch() =\n%s\nwant\n%s", gotText, wantText)
+			}
+			if !slices.Equal(names, []string{"alpha", "alpha"}) {
+				t.Fatalf("GetMachine names = %q, want alpha at startup and on one refresh", names)
+			}
+			if !deadlines[1] {
+				t.Fatal("GetMachine() context of the refresh has no request timeout")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+}
+
+func TestMachineShowFollowValidation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"alpha", "--follow=0s"}, want: "machine follow interval must be greater than zero"},
+		{args: []string{"alpha", "--follow=-1s"}, want: "machine follow interval must be greater than zero"},
+		{args: []string{"alpha", "--follow", "invalid"}, want: `invalid machine follow interval "invalid"`},
+		{args: []string{"alpha", "10s"}, want: "machine follow interval requires --follow"},
+		{args: []string{"alpha", "--follow", "1s", "2s"}, want: "accepts between 0 and 2 arg(s), received 3"},
+		{args: []string{"alpha", "--follow", "--json"}, want: "if any flags in the group [json raw follow] are set none of the others can be"},
+		{args: []string{"alpha", "--follow", "--raw"}, want: "if any flags in the group [json raw follow] are set none of the others can be"},
+	}
+	for _, test := range tests {
+		client := &fakeAPI{
+			listMachines: func(context.Context) ([]api.Machine, error) {
+				t.Errorf("%q: unexpected call to ListMachines", test.args)
+				return nil, nil
+			},
+			getMachine: func(context.Context, string) (api.Machine, error) {
+				t.Errorf("%q: unexpected call to GetMachine", test.args)
+				return api.Machine{}, nil
+			},
+		}
+		app, stdout, _ := newTestApp(t, withAPI(client), withTTY())
+		err := run(t, app, append([]string{"machine", "show"}, test.args...)...)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%q: err = %v, want %q", test.args, err, test.want)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("%q: stdout = %q, want empty", test.args, stdout.String())
+		}
+	}
+}
+
+func TestMachineFollowRequiresTerminal(t *testing.T) {
+	t.Parallel()
+	terminal := func(stream func(*App) any) testOption {
+		return func(app *App) {
+			want := stream(app)
+			app.IsTTY = func(candidate any) bool { return candidate == want }
+		}
+	}
+	modes := map[string]testOption{
+		"piped":        func(*App) {},
+		"stdout piped": terminal(func(app *App) any { return app.Stdin }),
+		"stdin piped":  terminal(func(app *App) any { return app.Stdout }),
+	}
+	commands := [][]string{
+		{"machine", "show", "alpha", "--follow"},
+		{"machine", "show", "--follow"},
+		{"machine", "list", "--follow"},
+	}
+	for name, mode := range modes {
+		for _, args := range commands {
+			client := &fakeAPI{
+				listMachines: func(context.Context) ([]api.Machine, error) {
+					t.Errorf("%s %q: unexpected call to ListMachines", name, args)
+					return nil, nil
+				},
+				getMachine: func(context.Context, string) (api.Machine, error) {
+					t.Errorf("%s %q: unexpected call to GetMachine", name, args)
+					return api.Machine{}, nil
+				},
+			}
+			// Follow fails the test if run.
+			app, _, _ := newTestApp(t, withAPI(client), mode)
+			if err := run(t, app, args...); !errors.Is(err, errMachineFollowNeedsTerminal) {
+				t.Errorf("%s %q: err = %v, want errMachineFollowNeedsTerminal", name, args, err)
+			}
+		}
+	}
+}
+
+func TestMachineShowFollowStartupFailure(t *testing.T) {
+	t.Parallel()
+	notFound := &api.HTTPError{StatusCode: http.StatusNotFound, Method: http.MethodGet, Path: "/api/machines/10s"}
+	forbidden := &api.HTTPError{StatusCode: http.StatusForbidden, Method: http.MethodGet, Path: "/api/machines/10s"}
+	tests := []struct {
+		name     string
+		args     []string
+		err      *api.HTTPError
+		sentinel error
+		want     string
+	}{
+		{
+			name: "duration as name", args: []string{"machine", "show", "--follow", "10s"}, err: notFound, sentinel: api.ErrNotFound,
+			want: "machine \"10s\" not found; run `sat machine list` to see known machines; " +
+				"use --follow=10s to pick a machine with a custom interval",
+		},
+		{
+			name: "unknown name", args: []string{"machine", "show", "ghost", "--follow"}, err: notFound, sentinel: api.ErrNotFound,
+			want: "machine \"ghost\" not found; run `sat machine list` to see known machines",
+		},
+		{
+			name: "forbidden", args: []string{"machine", "show", "10s", "--follow"}, err: forbidden, sentinel: api.ErrForbidden,
+			want: "the API token lacks permission to inspect machines (HTTP 403); use a token that has it and run `sat auth login`",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			client := &fakeAPI{getMachine: func(context.Context, string) (api.Machine, error) {
+				calls++
+				return api.Machine{}, test.err
+			}}
+			// Follow fails the test if run.
+			app, stdout, _ := newTestApp(t, withAPI(client), withTTY())
+			err := run(t, app, test.args...)
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+			var httpErr *api.HTTPError
+			if !errors.Is(err, test.sentinel) || !errors.As(err, &httpErr) || httpErr != test.err {
+				t.Fatalf("err = %v, want errors.Is %v and errors.As the original", err, test.sentinel)
+			}
+			if calls != 1 || stdout.Len() != 0 {
+				t.Fatalf("GetMachine calls = %d, stdout = %q, want one call and no output", calls, stdout.String())
+			}
+		})
+	}
+}
+
+func TestMachineListFollowWiring(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{name: "flag without value", args: []string{"machine", "list", "--follow"}, want: 5 * time.Second},
+		{name: "alias, short flag and positional interval", args: []string{"machines", "ls", "-f", "10s"}, want: 10 * time.Second},
+		{name: "equals value", args: []string{"machine", "list", "--follow=10s"}, want: 10 * time.Second},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			machines := machineFixtures(t)
+			var deadlines []bool
+			client := &fakeAPI{listMachines: func(ctx context.Context) ([]api.Machine, error) {
+				_, ok := ctx.Deadline()
+				deadlines = append(deadlines, ok)
+				return machines, nil
+			}}
+			app, stdout, _ := newTestApp(t, withAPI(client), withMachineNow(), withTTY())
+			app.TermSize = func() (int, int, bool) { return 120, 40, true }
+			var gotOpts ui.DashboardOptions
+			var gotText string
+			app.Follow = followOnce(app, 60, &gotOpts, &gotText)
+
+			if err := run(t, app, test.args...); err != nil {
+				t.Fatal(err)
+			}
+			want := ui.DashboardOptions{Size: ui.Size{Width: 120, Height: 40}, Interval: test.want, Label: "machines"}
+			if gotOpts != want {
+				t.Fatalf("follow options = %#v, want %#v", gotOpts, want)
+			}
+			if wantText := formatMachineTable(machines, machineView{Now: machineNow, Color: true, Width: 60}); gotText != wantText {
+				t.Fatalf("fetch() =\n%s\nwant\n%s", gotText, wantText)
+			}
+			if len(deadlines) != 2 || !deadlines[1] {
+				t.Fatalf("ListMachines deadlines = %v, want a startup call and a refresh with a request timeout", deadlines)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		app, _, stderr := newTestApp(t, withAPI(listMachines(nil)), withTTY())
+		var gotOpts ui.DashboardOptions
+		var gotText string
+		app.Follow = followOnce(app, 80, &gotOpts, &gotText)
+		if err := run(t, app, "machine", "list", "--follow"); err != nil {
+			t.Fatal(err)
+		}
+		if gotText != "No machines.\n" || stderr.Len() != 0 {
+			t.Fatalf("fetch() = %q, stderr = %q, want No machines. and nothing", gotText, stderr.String())
+		}
+	})
+}
+
+func TestMachineListFollowValidation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"--follow=0s"}, want: "machine follow interval must be greater than zero"},
+		{args: []string{"--follow", "invalid"}, want: `invalid machine follow interval "invalid"`},
+		{args: []string{"10s"}, want: "machine follow interval requires --follow"},
+		{args: []string{"alpha"}, want: "machine follow interval requires --follow"},
+		{args: []string{"--follow", "1s", "2s"}, want: "accepts at most 1 arg(s), received 2"},
+		{args: []string{"--follow", "--json"}, want: "if any flags in the group [json follow] are set none of the others can be"},
+	}
+	for _, test := range tests {
+		client := &fakeAPI{listMachines: func(context.Context) ([]api.Machine, error) {
+			t.Errorf("%q: unexpected call to ListMachines", test.args)
+			return nil, nil
+		}}
+		app, stdout, _ := newTestApp(t, withAPI(client), withTTY())
+		err := run(t, app, append([]string{"machine", "list"}, test.args...)...)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%q: err = %v, want %q", test.args, err, test.want)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("%q: stdout = %q, want empty", test.args, stdout.String())
+		}
+	}
+}
+
+func TestMachineListFollowStartupFailure(t *testing.T) {
+	t.Parallel()
+	forbidden := &api.HTTPError{StatusCode: http.StatusForbidden, Method: http.MethodGet, Path: "/api/machines"}
+	calls := 0
+	client := &fakeAPI{listMachines: func(context.Context) ([]api.Machine, error) {
+		calls++
+		return nil, forbidden
+	}}
+	// Follow fails the test if run.
+	app, _, _ := newTestApp(t, withAPI(client), withTTY())
+	err := run(t, app, "machine", "list", "--follow")
+	if !errors.Is(err, api.ErrForbidden) || !strings.Contains(err.Error(), "lacks permission to inspect machines") {
+		t.Fatalf("err = %v, want the reworded 403", err)
+	}
+	if calls != 1 {
+		t.Fatalf("ListMachines calls = %d, want 1", calls)
 	}
 }

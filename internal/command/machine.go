@@ -1,12 +1,17 @@
 package command
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/mantas6/sat-cli/internal/api"
 	"github.com/spf13/cobra"
 )
+
+var errMachineFollowNeedsTerminal = errors.New("machine follow mode requires a terminal on stdin and stdout")
 
 func newMachineCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
@@ -30,19 +35,46 @@ func newMachineCommand(app *App) *cobra.Command {
 
 func newMachineListCommand(app *App) *cobra.Command {
 	var asJSON bool
+	var follow time.Duration
 	command := &cobra.Command{
-		Use:     "list",
+		Use:     "list [interval]",
 		Aliases: []string{"ls"},
 		Short:   "List machines with their latest readings",
 		Long: "List every machine sorted by name with its online state and latest readings.\n\n" +
 			"On a terminal, columns that do not fit its width are dropped. With --json, the API " +
-			"response's data value is printed unrounded for scripts.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"response's data value is printed unrounded for scripts.\n\n" +
+			"With --follow, the list is refreshed in a full-screen terminal. An optional positional " +
+			"duration may be used, for example `sat machine list --follow 10s`.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			following := cmd.Flags().Changed("follow")
+			if err := checkMachineFollow(app, following, &follow, args); err != nil {
+				return err
+			}
+
 			client, err := apiClient(app)
 			if err != nil {
 				return err
 			}
+			if following {
+				fetch := func(ctx context.Context) (string, error) {
+					machines, err := client.ListMachines(ctx)
+					if err != nil {
+						return "", machineError(err, "")
+					}
+					if len(machines) == 0 {
+						return "No machines.\n", nil
+					}
+					return formatMachineTable(machines, app.machineView()), nil
+				}
+				// Fetch once up front so a failing request ends the command
+				// instead of showing the refresh failure badge forever.
+				if _, err := fetch(cmd.Context()); err != nil {
+					return err
+				}
+				return runFollow(cmd.Context(), app, follow, "machines", fetch)
+			}
+
 			machines, err := client.ListMachines(cmd.Context())
 			if err != nil {
 				return machineError(err, "")
@@ -64,7 +96,36 @@ func newMachineListCommand(app *App) *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "print the API response as JSON")
+	addFollowFlag(command, &follow)
+	command.MarkFlagsMutuallyExclusive("json", "follow")
 	return command
+}
+
+// checkMachineFollow validates follow mode before any request. args holds
+// the optional positional interval, which overrides the --follow value and
+// requires --follow.
+func checkMachineFollow(app *App, following bool, interval *time.Duration, args []string) error {
+	if len(args) > 0 {
+		if !following {
+			return errors.New("machine follow interval requires --follow")
+		}
+		parsed, err := time.ParseDuration(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid machine follow interval %q: %w", args[0], err)
+		}
+		*interval = parsed
+	}
+	if !following {
+		return nil
+	}
+	if *interval <= 0 {
+		return errors.New("machine follow interval must be greater than zero")
+	}
+	// The follow view reads its quit keys from stdin.
+	if !app.interactive() {
+		return errMachineFollowNeedsTerminal
+	}
+	return nil
 }
 
 // machineJSON returns the machine object as the API sent it, or the decoded
