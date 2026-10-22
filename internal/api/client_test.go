@@ -238,7 +238,7 @@ func TestHTTPErrorMappingAndTruncation(t *testing.T) {
 		sentinel error
 	}{
 		{http.StatusUnauthorized, `{"message":"bad credentials"}`, "bad credentials; token is invalid or expired", ErrUnauthorized},
-		{http.StatusForbidden, `{"message":"ability denied"}`, "ability denied; token lacks the required ability", ErrForbidden},
+		{http.StatusForbidden, `{"message":"access denied"}`, "access denied; token lacks the required permission", ErrForbidden},
 		{http.StatusNotFound, `{"message":"No such resource."}`, "HTTP 404 Not Found: No such resource.", ErrNotFound},
 		{http.StatusUnprocessableEntity, `{"message":"The contents field is required."}`, "The contents field is required.", nil},
 		{http.StatusInternalServerError, "server exploded", "server exploded", nil},

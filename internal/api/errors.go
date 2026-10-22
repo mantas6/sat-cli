@@ -13,7 +13,7 @@ var (
 	// is missing, invalid or expired.
 	ErrUnauthorized = errors.New("unauthorized")
 	// ErrForbidden matches an *HTTPError for an HTTP 403 response: the token
-	// lacks the ability the endpoint requires.
+	// lacks the permission the endpoint requires.
 	ErrForbidden = errors.New("forbidden")
 	// ErrNotFound matches an *HTTPError for an HTTP 404 response: the requested
 	// resource does not exist.
@@ -51,7 +51,7 @@ func (e *HTTPError) Error() string {
 	case http.StatusUnauthorized:
 		message += "; token is invalid or expired"
 	case http.StatusForbidden:
-		message += "; token lacks the required ability"
+		message += "; token lacks the required permission"
 	}
 
 	return message
