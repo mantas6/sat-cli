@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mantas6/sat-cli/internal/ui"
 	"github.com/spf13/cobra"
 )
-
-const dashboardRequestTimeout = 10 * time.Second
 
 var errDashboardNeedsTerminal = errors.New("dashboard follow mode requires a terminal on stdin and stdout")
 
@@ -51,20 +48,10 @@ func newDashboardCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fetch := func(ctx context.Context) (string, error) {
-				requestContext, cancel := context.WithTimeout(ctx, dashboardRequestTimeout)
-				defer cancel()
-				return client.Dashboard(requestContext)
-			}
-			opts := ui.DashboardOptions{Interval: follow}
-			if width, height, ok := app.TermSize(); ok {
-				opts.Width, opts.Height = width, height
-			}
-			return app.Follow(cmd.Context(), app.Stdin, app.Stdout, fetch, opts)
+			return runFollow(cmd.Context(), app, follow, "", client.Dashboard)
 		},
 	}
-	command.Flags().DurationVarP(&follow, "follow", "f", 0, "refresh continuously (default interval "+ui.DefaultDashboardInterval.String()+")")
-	command.Flags().Lookup("follow").NoOptDefVal = ui.DefaultDashboardInterval.String()
+	addFollowFlag(command, &follow)
 	return command
 }
 

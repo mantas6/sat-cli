@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -28,6 +30,25 @@ const (
 type DashboardOptions struct {
 	Size
 	Interval time.Duration
+	// Label names what is being followed in the loading and failure text,
+	// for example "machines". Empty means "dashboard".
+	Label string
+}
+
+// statusText returns the loading line and the failure badge text for opts.
+func (opts DashboardOptions) statusText() (loading, failed string) {
+	if opts.Label == "" {
+		return dashboardLoading, dashboardFailed
+	}
+	return "Loading " + opts.Label + "…", " " + upperFirst(opts.Label) + " refresh failed; retrying."
+}
+
+func upperFirst(text string) string {
+	first, size := utf8.DecodeRuneInString(text)
+	if first == utf8.RuneError {
+		return text
+	}
+	return string(unicode.ToUpper(first)) + text[size:]
 }
 
 // Fetcher returns the latest dashboard text.
@@ -71,6 +92,8 @@ type dashboardModel struct {
 	cancel   context.CancelFunc
 	fetch    Fetcher
 	interval time.Duration
+	loading  string
+	failed   string
 	width    int
 	height   int
 	text     string
@@ -84,11 +107,14 @@ type dashboardModel struct {
 
 func newDashboardModel(ctx context.Context, fetch Fetcher, opts DashboardOptions) *dashboardModel {
 	size := opts.orDefault()
+	loading, failed := opts.statusText()
 	return &dashboardModel{
 		ctx:      ctx,
 		cancel:   func() {},
 		fetch:    fetch,
 		interval: opts.Interval,
+		loading:  loading,
+		failed:   failed,
 		width:    size.Width,
 		height:   size.Height,
 		tick: func(interval time.Duration) tea.Cmd {
@@ -155,7 +181,7 @@ func (m *dashboardModel) View() tea.View {
 
 func (m *dashboardModel) content() string {
 	if !m.loaded {
-		return ansi.Truncate(dashboardLoading, m.width, "")
+		return ansi.Truncate(m.loading, m.width, "")
 	}
 
 	lineLimit := m.height
@@ -165,7 +191,7 @@ func (m *dashboardModel) content() string {
 	lines := m.lines[:min(len(m.lines), max(0, lineLimit))]
 	if m.hasError && m.height > 0 {
 		badge := errorBadgeStyle.Render(" <!> ")
-		lines = append(lines[:len(lines):len(lines)], ansi.Truncate(badge+dashboardFailed, m.width, ""))
+		lines = append(lines[:len(lines):len(lines)], ansi.Truncate(badge+m.failed, m.width, ""))
 	}
 	return strings.Join(lines, "\n")
 }

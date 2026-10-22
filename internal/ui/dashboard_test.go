@@ -172,6 +172,29 @@ func TestDashboardModelFailureBeforeFirstSuccessShowsBadge(t *testing.T) {
 	}
 }
 
+func TestDashboardModelLabelNamesWhatIsFollowed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		label   string
+		loading string
+		failed  string
+	}{
+		{"", "Loading dashboard…", " Dashboard refresh failed; retrying."},
+		{"machines", "Loading machines…", " Machines refresh failed; retrying."},
+		{"machine build-01", "Loading machine build-01…", " Machine build-01 refresh failed; retrying."},
+	}
+	for _, test := range tests {
+		model := newTestDashboard(DashboardOptions{Size: Size{Width: 80, Height: 3}, Label: test.label})
+		if got := model.View().Content; got != test.loading {
+			t.Fatalf("label %q: loading View() = %q, want %q", test.label, got, test.loading)
+		}
+		model.Update(fetchResultMsg{err: errors.New("down")})
+		if got := ansi.Strip(model.View().Content); got != " <!> "+test.failed {
+			t.Fatalf("label %q: failure View() = %q, want %q", test.label, got, " <!> "+test.failed)
+		}
+	}
+}
+
 func TestDashboardModelTruncatesWidthAndHeight(t *testing.T) {
 	t.Parallel()
 	model := newTestDashboard(DashboardOptions{Size: Size{Width: 5, Height: 2}})
