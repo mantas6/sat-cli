@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"io"
 	"strings"
 )
@@ -16,4 +17,14 @@ func writeLine(w io.Writer, text string) error {
 	}
 	_, err := io.WriteString(w, "\n")
 	return err
+}
+
+// writeJSON writes value as JSON indented by two spaces with a trailing
+// newline. HTML characters are not escaped and json.RawMessage values keep
+// their number literals.
+func writeJSON(w io.Writer, value any) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }

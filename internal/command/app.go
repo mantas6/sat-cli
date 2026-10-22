@@ -47,6 +47,8 @@ type APIClient interface {
 	Dashboard(ctx context.Context) (string, error)
 	Weather(ctx context.Context, place string) (string, error)
 	Notify(ctx context.Context, message string) error
+	ListMachines(ctx context.Context) ([]api.Machine, error)
+	GetMachine(ctx context.Context, name string) (api.Machine, error)
 }
 
 // APIClientFactory constructs an API client from persisted configuration.

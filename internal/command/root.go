@@ -22,7 +22,8 @@ Environment:
   SAT_TOKEN_PATH     Override path of the token file (default: <state>/token)
   REMOTE_HOST        SSH host for sat run (default: derived from the base URL)
   REMOTE_USER        SSH user for sat run (default: none)
-  REMOTE_ROOT        Remote release directory for sat run (default: $HOME/Sat/current)`,
+  REMOTE_ROOT        Remote release directory for sat run (default: $HOME/Sat/current)
+  NO_COLOR           Disable colours`,
 		Version:       app.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -37,6 +38,7 @@ Environment:
 		newArlCommand(app),
 		newAuthCommand(app),
 		newDashboardCommand(app),
+		newMachineCommand(app),
 		newMusicCommand(app),
 		newNotifyCommand(app),
 		newRunCommand(app),

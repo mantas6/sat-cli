@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -33,6 +34,8 @@ type fakeAPI struct {
 	dashboard             func(ctx context.Context) (string, error)
 	weather               func(ctx context.Context, place string) (string, error)
 	notify                func(ctx context.Context, message string) error
+	listMachines          func(ctx context.Context) ([]api.Machine, error)
+	getMachine            func(ctx context.Context, name string) (api.Machine, error)
 }
 
 var _ APIClient = (*fakeAPI)(nil)
@@ -119,6 +122,71 @@ func (f *fakeAPI) Notify(ctx context.Context, message string) error {
 		return nil
 	}
 	return f.notify(ctx, message)
+}
+
+func (f *fakeAPI) ListMachines(ctx context.Context) ([]api.Machine, error) {
+	if f.listMachines == nil {
+		return nil, nil
+	}
+	return f.listMachines(ctx)
+}
+
+func (f *fakeAPI) GetMachine(ctx context.Context, name string) (api.Machine, error) {
+	if f.getMachine == nil {
+		return api.Machine{}, nil
+	}
+	return f.getMachine(ctx, name)
+}
+
+// machineFixturesJSON is a list of machines as the API sends it: alpha is
+// online with every reading, beta is offline and reported none.
+const machineFixturesJSON = `[
+	{
+		"name": "alpha",
+		"online": true,
+		"received_at": "2026-10-22T14:03:04+00:00",
+		"uptime": {"milliseconds": 18000000, "for_humans": "5h", "exceeds_day": false},
+		"kernel_version": "6.8.0-45-generic",
+		"cpu": {"name": "AMD Ryzen 7 5800X <8-Core>", "temperature": 78.25, "usage_percentage": 87.4},
+		"load_average": {"1m": 6.12, "5m": 4.8, "15m": 3.95},
+		"memory": {
+			"usage_percentage": 91.2, "usage_with_swap_percentage": 78.1, "usage_high": true,
+			"used_gb": 14.1, "used_with_swap_gb": 15.2, "total_gb": 15.5,
+			"swap_used_gb": 3.7252902984619141, "swap_total_gb": 4
+		},
+		"disk": {
+			"usage_percentage": 42, "free_percentage": 58, "usage_high": false,
+			"used_gb": 196, "free_gb": 271, "total_gb": 467, "temperature": 38
+		}
+	},
+	{
+		"name": "beta",
+		"online": false,
+		"received_at": "2026-10-22T11:00:00+00:00",
+		"uptime": {"milliseconds": null, "for_humans": null, "exceeds_day": false},
+		"kernel_version": null,
+		"cpu": {"name": null, "temperature": null, "usage_percentage": null},
+		"load_average": {"1m": null, "5m": null, "15m": null},
+		"memory": {
+			"usage_percentage": null, "usage_with_swap_percentage": null, "usage_high": false,
+			"used_gb": null, "used_with_swap_gb": null, "total_gb": null,
+			"swap_used_gb": null, "swap_total_gb": null
+		},
+		"disk": {
+			"usage_percentage": null, "free_percentage": null, "usage_high": false,
+			"used_gb": null, "free_gb": null, "total_gb": null, "temperature": null
+		}
+	}
+]`
+
+// machineFixtures decodes machineFixturesJSON, so every machine has Raw set.
+func machineFixtures(t *testing.T) []api.Machine {
+	t.Helper()
+	var machines []api.Machine
+	if err := json.Unmarshal([]byte(machineFixturesJSON), &machines); err != nil {
+		t.Fatal(err)
+	}
+	return machines
 }
 
 // fakeConfig is an in-memory ConfigStore. The zero value is unconfigured;

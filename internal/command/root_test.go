@@ -31,6 +31,7 @@ func TestRootHelpAndVersion(t *testing.T) {
 			"REMOTE_HOST",
 			"REMOTE_USER",
 			"REMOTE_ROOT",
+			"NO_COLOR",
 		} {
 			if !strings.Contains(help, want) {
 				t.Fatalf("help output missing %q: %q", want, help)
@@ -82,6 +83,9 @@ func TestRootCommandAliases(t *testing.T) {
 		{[]string{"arl"}, "arl"},
 		{[]string{"article", "arl"}, "read"},
 		{[]string{"dash"}, "dashboard"},
+		{[]string{"machines"}, "machine"},
+		{[]string{"machine", "ls"}, "list"},
+		{[]string{"machines", "ls"}, "list"},
 		{[]string{"wt"}, "weather"},
 	}
 	for _, tc := range cases {
@@ -126,7 +130,7 @@ func TestArlRunsArticleRead(t *testing.T) {
 
 func TestGroupCommandsRejectUnknownSubcommands(t *testing.T) {
 	t.Parallel()
-	for _, group := range []string{"article", "music"} {
+	for _, group := range []string{"article", "machine", "music"} {
 		t.Run(group, func(t *testing.T) {
 			t.Parallel()
 			app, _, _ := newTestApp(t)

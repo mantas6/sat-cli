@@ -56,3 +56,40 @@ func addLoginHints(cmd *cobra.Command) {
 		addLoginHints(child)
 	}
 }
+
+// messageError replaces the text of err with message while errors.Is and
+// errors.As still see err.
+type messageError struct {
+	message string
+	err     error
+}
+
+// Error returns the replacement message.
+func (e messageError) Error() string {
+	return e.message
+}
+
+// Unwrap exposes the original error.
+func (e messageError) Unwrap() error {
+	return e.err
+}
+
+// machineError rewords API failures of the machine commands. name is the
+// machine that was looked up, or "" when listing; a 404 is only reworded for
+// a lookup. A 401 is left to withLoginHint and other errors pass through
+// unchanged.
+func machineError(err error, name string) error {
+	switch {
+	case name != "" && errors.Is(err, api.ErrNotFound):
+		return messageError{
+			message: fmt.Sprintf("machine %q not found; run `sat machine list` to see known machines", name),
+			err:     err,
+		}
+	case errors.Is(err, api.ErrForbidden):
+		return messageError{
+			message: "the API token lacks permission to inspect machines (HTTP 403); use a token that has it and run `sat auth login`",
+			err:     err,
+		}
+	}
+	return err
+}
