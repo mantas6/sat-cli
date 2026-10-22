@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mantas6/sat-cli/internal/api"
+	"github.com/mantas6/sat-cli/internal/ui"
 )
 
 // listMachines returns a fakeAPI whose ListMachines returns machines.
@@ -164,8 +167,12 @@ func TestMachineErrors(t *testing.T) {
 	httpError := func(status int) *api.HTTPError {
 		return &api.HTTPError{StatusCode: status, Method: http.MethodGet, Path: "/api/machines"}
 	}
+	show := []string{"machine", "show", "ghost"}
 	tests := []struct {
-		name     string
+		name string
+		// args default to machine list. Every case runs on a terminal, so a
+		// show without a name lists the machines for the picker.
+		args     []string
 		err      *api.HTTPError
 		sentinel error
 		want     func(message string) bool
@@ -190,13 +197,52 @@ func TestMachineErrors(t *testing.T) {
 			name: "server error", err: httpError(http.StatusInternalServerError),
 			want: func(message string) bool { return message == httpError(http.StatusInternalServerError).Error() },
 		},
+		{
+			name: "show not found", args: show, err: httpError(http.StatusNotFound), sentinel: api.ErrNotFound,
+			want: func(message string) bool {
+				return message == "machine \"ghost\" not found; run `sat machine list` to see known machines"
+			},
+		},
+		{
+			name: "show forbidden", args: show, err: httpError(http.StatusForbidden), sentinel: api.ErrForbidden,
+			want: func(message string) bool {
+				return message == "the API token lacks permission to inspect machines (HTTP 403); use a token that has it and run `sat auth login`"
+			},
+		},
+		{
+			name: "show unauthorized", args: show, err: httpError(http.StatusUnauthorized), sentinel: api.ErrUnauthorized,
+			want: func(message string) bool {
+				return strings.HasPrefix(message, "GET /api/machines: HTTP 401") && strings.HasSuffix(message, "; run `sat auth login`")
+			},
+		},
+		{
+			name: "show server error", args: show, err: httpError(http.StatusInternalServerError),
+			want: func(message string) bool { return message == httpError(http.StatusInternalServerError).Error() },
+		},
+		{
+			name: "picker not found", args: []string{"machine", "show"}, err: httpError(http.StatusNotFound), sentinel: api.ErrNotFound,
+			want: func(message string) bool { return message == httpError(http.StatusNotFound).Error() },
+		},
+		{
+			name: "picker forbidden", args: []string{"machine", "show"}, err: httpError(http.StatusForbidden), sentinel: api.ErrForbidden,
+			want: func(message string) bool {
+				return message == "the API token lacks permission to inspect machines (HTTP 403); use a token that has it and run `sat auth login`"
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			client := &fakeAPI{listMachines: func(context.Context) ([]api.Machine, error) { return nil, test.err }}
-			app, stdout, _ := newTestApp(t, withAPI(client))
-			err := run(t, app, "machine", "list")
+			client := &fakeAPI{
+				listMachines: func(context.Context) ([]api.Machine, error) { return nil, test.err },
+				getMachine:   func(context.Context, string) (api.Machine, error) { return api.Machine{}, test.err },
+			}
+			args := test.args
+			if args == nil {
+				args = []string{"machine", "list"}
+			}
+			app, stdout, _ := newTestApp(t, withAPI(client), withTTY())
+			err := run(t, app, args...)
 			if err == nil || !test.want(err.Error()) {
 				t.Fatalf("err = %v, unexpected wording", err)
 			}
@@ -236,4 +282,264 @@ func TestMachineErrors(t *testing.T) {
 			t.Fatalf("machineError(nil) = %v, want nil", got)
 		}
 	})
+}
+
+// getMachine returns a fakeAPI whose GetMachine returns the machine with the
+// requested name from machines and records the names it was asked for.
+func getMachine(t *testing.T, machines []api.Machine, names *[]string) *fakeAPI {
+	t.Helper()
+	return &fakeAPI{
+		listMachines: func(context.Context) ([]api.Machine, error) { return machines, nil },
+		getMachine: func(_ context.Context, name string) (api.Machine, error) {
+			if names != nil {
+				*names = append(*names, name)
+			}
+			for _, machine := range machines {
+				if machine.Name == name {
+					return machine, nil
+				}
+			}
+			t.Errorf("GetMachine(%q), want a known machine", name)
+			return api.Machine{}, &api.HTTPError{StatusCode: http.StatusNotFound}
+		},
+	}
+}
+
+func TestMachineShowByName(t *testing.T) {
+	t.Parallel()
+	machines := machineFixtures(t)
+	var names []string
+	app, stdout, stderr := newTestApp(t, withAPI(getMachine(t, machines, &names)), withMachineNow(), withTTY())
+	app.TermSize = func() (int, int, bool) { return 100, 24, true }
+	if err := run(t, app, "machine", "show", "  alpha \t"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(names, []string{"alpha"}) {
+		t.Fatalf("GetMachine names = %q, want [alpha]", names)
+	}
+	want := formatMachine(machines[0], machineView{Now: machineNow, Color: true, Width: 100})
+	if got := stdout.String(); got != want || !strings.Contains(got, "\x1b[") {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	app, stdout, _ = newTestApp(t, withAPI(getMachine(t, machines, nil)), withMachineNow())
+	if err := run(t, app, "machines", "show", "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != machineDetailMockup {
+		t.Fatalf("piped stdout =\n%s\nwant\n%s", got, machineDetailMockup)
+	}
+}
+
+// statsMachine is a machine as GetMachine decodes it, with stats modules
+// whose number literals must survive.
+func statsMachine(t *testing.T) api.Machine {
+	t.Helper()
+	data := `{"name":"alpha","online":true,"memory":{"swap_used_gb":3.7252902984619141},` +
+		`"stats":[{"type":"cpu","result":{"load":[1.10,0.5e1]}},{"type":"note","result":"<ok>"}]}`
+	var machine api.Machine
+	if err := json.Unmarshal([]byte(data), &machine); err != nil {
+		t.Fatal(err)
+	}
+	return machine
+}
+
+func TestMachineShowJSON(t *testing.T) {
+	t.Parallel()
+	app, stdout, _ := newTestApp(t, withAPI(getMachine(t, []api.Machine{statsMachine(t)}, nil)), withTTY())
+	if err := run(t, app, "machine", "show", "alpha", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	for _, want := range []string{"{\n  \"name\": \"alpha\",\n", `"swap_used_gb": 3.7252902984619141`, `1.10`, `0.5e1`, `"<ok>"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout does not contain %q:\n%s", want, got)
+		}
+	}
+	if !strings.HasSuffix(got, "}\n") || strings.Contains(got, "\x1b") {
+		t.Fatalf("stdout = %q, want an uncoloured object ending in a newline", got)
+	}
+}
+
+func TestMachineShowRaw(t *testing.T) {
+	t.Parallel()
+	app, stdout, _ := newTestApp(t, withAPI(getMachine(t, []api.Machine{statsMachine(t)}, nil)), withTTY())
+	if err := run(t, app, "machine", "show", "alpha", "--raw"); err != nil {
+		t.Fatal(err)
+	}
+	want := `[
+  {
+    "type": "cpu",
+    "result": {
+      "load": [
+        1.10,
+        0.5e1
+      ]
+    }
+  },
+  {
+    "type": "note",
+    "result": "<ok>"
+  }
+]
+`
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestMachineShowRawWithoutStats(t *testing.T) {
+	t.Parallel()
+	decoded := func(data string) api.Machine {
+		var machine api.Machine
+		if err := json.Unmarshal([]byte(data), &machine); err != nil {
+			t.Fatal(err)
+		}
+		return machine
+	}
+	tests := []struct {
+		name    string
+		machine api.Machine
+		want    string
+	}{
+		{name: "missing", machine: decoded(`{"name":"alpha"}`), want: "[]\n"},
+		{name: "null", machine: decoded(`{"name":"alpha","stats":null}`), want: "[]\n"},
+		{name: "empty", machine: decoded(`{"name":"alpha","stats":[]}`), want: "[]\n"},
+		{name: "decoded without stats", machine: api.Machine{Name: "alpha"}, want: "[]\n"},
+		{
+			name: "decoded with stats",
+			machine: api.Machine{Name: "alpha", Stats: []api.MachineStat{
+				{Type: "note", Result: json.RawMessage(`"<ok>"`)},
+				{Type: "empty"},
+			}},
+			want: "[\n  {\n    \"type\": \"note\",\n    \"result\": \"<ok>\"\n  },\n" +
+				"  {\n    \"type\": \"empty\",\n    \"result\": null\n  }\n]\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			app, stdout, _ := newTestApp(t, withAPI(getMachine(t, []api.Machine{test.machine}, nil)))
+			if err := run(t, app, "machine", "show", "alpha", "--raw"); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != test.want {
+				t.Fatalf("stdout = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMachineShowValidation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"  "}, want: "machine name must not be empty"},
+		{args: []string{""}, want: "machine name must not be empty"},
+		{args: []string{"alpha", "--json", "--raw"}, want: "if any flags in the group [json raw] are set none of the others can be"},
+		{args: []string{"alpha", "beta"}, want: "accepts at most 1 arg(s), received 2"},
+	}
+	for _, test := range tests {
+		client := &fakeAPI{getMachine: func(context.Context, string) (api.Machine, error) {
+			t.Errorf("%q: unexpected call to GetMachine", test.args)
+			return api.Machine{}, nil
+		}}
+		app, stdout, _ := newTestApp(t, withAPI(client), withTTY())
+		err := run(t, app, append([]string{"machine", "show"}, test.args...)...)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%q: err = %v, want %q", test.args, err, test.want)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("%q: stdout = %q, want empty", test.args, stdout.String())
+		}
+	}
+}
+
+func TestMachineShowPicker(t *testing.T) {
+	t.Parallel()
+	machines := machineFixtures(t)
+	var names []string
+	var gotItems []ui.Item
+	var gotOpts ui.SelectOptions
+	app, stdout, _ := newTestApp(t, withAPI(getMachine(t, machines, &names)), withMachineNow(), withTTY(),
+		withEnv(map[string]string{"NO_COLOR": "1"}))
+	app.TermSize = func() (int, int, bool) { return 100, 30, true }
+	app.Select = selectIndex(1, &gotItems, &gotOpts)
+	if err := run(t, app, "machine", "show"); err != nil {
+		t.Fatal(err)
+	}
+	if gotOpts.Title != "Machines" || gotOpts.Query != "" || gotOpts.Width != 100 || gotOpts.Height != 30 {
+		t.Fatalf("Select options = %+v, want title Machines at 100x30", gotOpts)
+	}
+	if len(gotItems) != len(machines) {
+		t.Fatalf("Select items = %+v, want one per machine", gotItems)
+	}
+	for index, item := range gotItems {
+		if want := machineItem(machines[index], machineNow); item.ID != machines[index].Name || !slices.Equal(item.Columns, want.Columns) {
+			t.Errorf("item %d = %+v, want %+v", index, item, want)
+		}
+	}
+	if !slices.Equal(names, []string{"beta"}) {
+		t.Fatalf("GetMachine names = %q, want [beta]", names)
+	}
+	if got, want := stdout.String(), formatMachine(machines[1], machineView{Now: machineNow, Width: 100}); got != want {
+		t.Fatalf("stdout =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestMachineShowWithoutNameNeedsTerminal(t *testing.T) {
+	t.Parallel()
+	terminal := func(stream any) testOption {
+		return func(app *App) {
+			app.IsTTY = func(candidate any) bool { return candidate == stream }
+		}
+	}
+	for name, opt := range map[string]testOption{
+		"piped":        func(*App) {},
+		"stdout piped": func(app *App) { terminal(app.Stdin)(app) },
+		"stdin piped":  func(app *App) { terminal(app.Stdout)(app) },
+	} {
+		client := &fakeAPI{listMachines: func(context.Context) ([]api.Machine, error) {
+			t.Errorf("%s: unexpected call to ListMachines", name)
+			return nil, nil
+		}}
+		app, _, _ := newTestApp(t, withAPI(client), opt)
+		if err := run(t, app, "machine", "show"); !errors.Is(err, errMachineNameRequired) {
+			t.Errorf("%s: err = %v, want errMachineNameRequired", name, err)
+		}
+	}
+}
+
+func TestMachineShowPickerCancelled(t *testing.T) {
+	t.Parallel()
+	client := getMachine(t, machineFixtures(t), nil)
+	client.getMachine = func(context.Context, string) (api.Machine, error) {
+		t.Error("unexpected call to GetMachine")
+		return api.Machine{}, nil
+	}
+	app, stdout, _ := newTestApp(t, withAPI(client), withTTY())
+	app.Select = func(context.Context, io.Reader, io.Writer, []ui.Item, ui.SelectOptions) (ui.Item, error) {
+		return ui.Item{}, ui.ErrCancelled
+	}
+	err := run(t, app, "machine", "show")
+	var exitError ExitError
+	if !errors.As(err, &exitError) || exitError.Code != 130 || !errors.Is(err, ui.ErrCancelled) {
+		t.Fatalf("err = %#v, want cancellation exit code 130", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestMachineShowPickerWithoutMachines(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestApp(t, withAPI(listMachines(nil)), withTTY(), withRealSelect())
+	if err := run(t, app, "machine", "show"); !errors.Is(err, ui.ErrNoItems) {
+		t.Fatalf("err = %v, want ui.ErrNoItems", err)
+	}
 }

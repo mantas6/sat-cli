@@ -42,3 +42,25 @@ func TestWriteJSONEmptySlice(t *testing.T) {
 		t.Fatalf("writeJSON([]) = %q, want []\\n", got)
 	}
 }
+
+func TestIndentJSON(t *testing.T) {
+	t.Parallel()
+	got, err := indentJSON(json.RawMessage(`[{"n":3.7252902984619141,"s":"<é>"},1e2]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[
+  {
+    "n": 3.7252902984619141,
+    "s": "<é>"
+  },
+  1e2
+]
+`
+	if string(got) != want {
+		t.Fatalf("indentJSON() =\n%s\nwant\n%s", got, want)
+	}
+	if _, err := indentJSON(json.RawMessage(`{"n":`)); err == nil {
+		t.Fatal("indentJSON(malformed) error = nil, want an error")
+	}
+}

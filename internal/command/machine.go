@@ -15,7 +15,7 @@ func newMachineCommand(app *App) *cobra.Command {
 		Short:   "Inspect machines that report system stats",
 		Long: "Inspect machines that report their system stats to Satellite.\n\n" +
 			"A machine is online when it reported within the last two minutes. Memory and disk " +
-			"usage of 85% or more is flagged as high with \"!\".\n\n" +
+			"usage of 85% or more is flagged as high: with \"!\" by list and \"(high)\" by show.\n\n" +
 			"The API token needs permission to inspect machines; the API answers HTTP 403 otherwise.",
 		// NoArgs rejects unknown subcommands; cobra only validates args of
 		// runnable commands, so RunE must stay to print help.
@@ -24,7 +24,7 @@ func newMachineCommand(app *App) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	command.AddCommand(newMachineListCommand(app))
+	command.AddCommand(newMachineListCommand(app), newMachineShowCommand(app))
 	return command
 }
 

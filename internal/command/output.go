@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"strings"
@@ -27,4 +28,15 @@ func writeJSON(w io.Writer, value any) error {
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
+}
+
+// indentJSON indents raw by two spaces and adds a trailing newline. Number
+// literals and escapes are kept as they are.
+func indentJSON(raw json.RawMessage) ([]byte, error) {
+	var out bytes.Buffer
+	if err := json.Indent(&out, raw, "", "  "); err != nil {
+		return nil, err
+	}
+	out.WriteByte('\n')
+	return out.Bytes(), nil
 }
